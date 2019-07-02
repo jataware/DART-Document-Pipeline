@@ -15,7 +15,7 @@ import re
 
 warnings.filterwarnings("ignore", category=PyPDF2.utils.PdfReadWarning)
 
-TEMP_DOWNLOAD_PATH = './tmp'
+TEMP_DOWNLOAD_PATH = '/tmp'
 
 # AWS CONFIG
 AWS_PROFILE = 'wmuser'
@@ -23,12 +23,15 @@ AWS_PROFILE = 'wmuser'
 # S3 CONFIG
 S3_BASE_URL = 'https://world-modelers.s3.amazonaws.com'
 S3_BASE_KEY = 'documents/migration'
+BUCKET_NAME = 'world-modelers'
 
 # ELASTIC SEARCH CONFIG
 S3_INDEX = 'wm-dev'
 DOC_TYPE = 'wm-document'
+REGION = 'us-east-1'
+SERVICE = 'es'
+ES_HOST = 'search-world-modelers-dev-gjvcliqvo44h4dgby7tn3psw74.us-east-1.es.amazonaws.com'
 
-BUCKET_NAME = 'world-modelers'
 SPREADSHEET = 'Six_Twelve-Month_November_2019_Evaluation_Documents-Updated-6June2019.xlsx'
 SHEET_NAMES = [
     'Six-Month Evaluation Documents',
@@ -87,12 +90,12 @@ def extract_bs4(file_path):
     bs4_extraction = '\n'.join(chunk for chunk in chunks if chunk)
     return bs4_extraction
 
-def parse_pdfinfo(tika_metadata, doc):
+def parse_pdfinfo(tika_metadata, doc, file_path):
     """
     Takes in pdfinfo from Tika and a document and enriches the document
     with metadata fields
     """
-    t_m = extract_tika(f"{dir_path}/pdf/{file_path}")[1]
+    t_m = extract_tika(file_path)[1]
     title = t_m.get('title',None)
     date = t_m.get('Creation-Date',t_m.get('created',None))
     author = t_m.get('Author',None)
@@ -156,7 +159,7 @@ def parse_document(file_path, category, source_url):
             print(f"BS4 extraction failed: {e}")
     
     if tika_metadata:
-        doc = parse_pdfinfo(tika_metadata, doc)
+        doc = parse_pdfinfo(tika_metadata, doc, file_path)
     
     doc['extracted_text'] = extracted_text
     
@@ -175,11 +178,9 @@ def get_filename_from_cd(cd):
 
 
 def connect_to_es():
-    region = 'us-east-1'
-    service = 'es'
-    eshost = 'search-world-modelers-dev-gjvcliqvo44h4dgby7tn3psw74.us-east-1.es.amazonaws.com'
+    
 
-    session = boto3.Session(region_name=region, profile_name='wmuser')
+    session = boto3.Session(region_name=REGION, profile_name='wmuser')
     credentials = session.get_credentials()
     credentials = credentials.get_frozen_credentials()
     access_key = credentials.access_key
@@ -189,13 +190,13 @@ def connect_to_es():
     aws_auth = AWS4Auth(
         access_key,
         secret_key,
-        region,
-        service,
+        REGION,
+        SERVICE,
         session_token=token
     )
     
     es = Elasticsearch(
-        hosts = [{'host': eshost, 'port': 443}],
+        hosts = [{'host': ES_HOST, 'port': 443}],
         http_auth=aws_auth,
         use_ssl=True,
         verify_certs=True,
@@ -229,52 +230,50 @@ def main():
                 print("Downloading - %s" % (sheet[f"D{row}"].value,))
                 r = requests.get(url_path, verify=False, stream=True, allow_redirects=True)
                 r.raw.decode_content = True
-                filename = get_filename_from_cd(r.headers.get('content-disposition'))
+                filename = f"./{TEMP_DOWNLOAD_PATH}/{get_filename_from_cd(r.headers.get('content-disposition'))}"
                 
-                open(f"{TEMP_DOWNLOAD_PATH}/{filename}", 'wb').write(r.content)
+                open(filename, 'wb').write(r.content)
                 #with open(f"{TEMP_DOWNLOAD_PATH}/{filename}", 'wb') as f:
                 #    shutil.copyfileobj(r.raw, f)    
                 
-                count = 0
-                for file_path in raw_files:    
-                    file_name = f"{TEMP_DOWNLOAD_PATH}/{filename}"
-                    s3_key = f"{S3_BASE_KEY}/{file_path}"
-                    s3_uri = f"{S3_BASE_URL}/{s3_key}"
+                count = 0    
+                s3_key = f"{S3_BASE_KEY}{TEMP_DOWNLOAD_PATH}"
+                s3_uri = f"{S3_BASE_URL}/{s3_key}"
 
-                    #############################################
-                    ### 1. Upload raw file to S3 ################
-                    #############################################
-                    s3_client.upload_file(file_name, BUCKET_NAME, s3_key)
-                    
-                    
-                    #############################################
-                    ### 2. Parse document #######################
-                    #############################################
-                    # hard code category and source_url (empty) for the time being
-                    title = doc_name
-                    category = 'Migration'
-                    source_url = url_path
-                    creation_date = doc_date
-                    doc = parse_document(file_name, category, source_url)
-                    doc['stored_url'] = s3_uri
-                    
-                    # Validate document against schema
-                    validate(instance=doc, schema=schema)
+                #############################################
+                ### 1. Upload raw file to S3 ################
+                #############################################
+                s3_client.upload_file(filename, BUCKET_NAME, s3_key)
+                
+                
+                #############################################
+                ### 2. Parse document #######################
+                #############################################
+                # hard code category and source_url (empty) for the time being
+                title = doc_name
+                category = 'Migration'
+                source_url = url_path
+                creation_date = doc_date
+                doc = parse_document(filename, category, source_url)
+                doc['stored_url'] = s3_uri
+                
+                # Validate document against schema
+                validate(instance=doc, schema=schema)
 
+                
+                #############################################
+                ### 3. Index parsed document to Elasticsearch
+                #############################################  
+                
+                # create the index if it does not exist
+                if not es.indices.exists(S3_INDEX):
+                    es.indices.create(S3_INDEX)
+                    print(f"Created ES index: {S3_INDEX}")
                     
-                    #############################################
-                    ### 3. Index parsed document to Elasticsearch
-                    #############################################  
-                    
-                    # create the index if it does not exist
-                    if not es.indices.exists(S3_INDEX):
-                        es.indices.create(S3_INDEX)
-                        print(f"Created ES index: {S3_INDEX}")
-                        
-                    es.index(index=S3_INDEX, doc_type=DOC_TYPE, id=doc.pop('_id'), body=doc)
-                    count += 1
-                    if count % 25 == 0:
-                        print(count)    
+                es.index(index=S3_INDEX, doc_type=DOC_TYPE, id=doc.pop('_id'), body=doc)
+                count += 1
+                if count % 25 == 0:
+                    print(count)    
             else:
                 print("Skipping due to incorrect URL")
             
