@@ -1,0 +1,195 @@
+{
+   "$id":"http://document-schema.worldmodelers.com",
+   "type":"object",
+   "title":"World Modelers Document Schema",
+   "description":"Defines a schema for World Modelers and DART.",
+   "required":[
+      "_id",
+      "file_name",
+      "file_type",
+      "extracted_text",
+      "stored_url",
+      "source_url"
+   ],
+   "properties":{
+      "_id":{
+         "$id":"#/properties/_id",
+         "type":"string",
+         "description":"SHA-256 hash of the raw file to generate a unique identifier",
+         "example":"239e910f11880045e6d2533c6ba86651dd89c54265047b26e5ac7e5792255775"
+      },
+      "file_name":{
+         "$id":"#/properties/file_name",
+         "type":"string",
+         "description":"The name of the original file",
+         "example":"Integrated_Disease_Surveillance_and_Response_(IDSR)_Annexes_25-Sep-17.pdf"
+      },
+      "file_type":{
+         "$id":"#/properties/file_type",
+         "type":"string",
+         "description":"The type of the original file",
+         "examples":[
+            ".pdf",
+            ".docx",
+            ".ppt"
+         ]
+      },
+      "stored_url":{
+         "$id":"#/properties/stored_url",
+         "type":"string",
+         "description":"The stored location of the file for World Modelers reference (S3)",
+         "example":"https://world-modelers.s3.amazonaws.com/documents/migration/Integrated_Disease_Surveillance_and_Response_(IDSR)_Annexes_25-Sep-17.pdf"
+      },
+      "source_url":{
+         "$id":"#/properties/source_url",
+         "type":"string",
+         "description":"The original web location of the file",
+         "example":"https://www.afro.who.int/sites/default/files/2019-06/South%20Sudan%20IDSR%20Bulletin%20-%20W23%20June%203%20-%20June%209%202019..pdf"
+      },
+      "extracted_text":{
+         "$id":"#/properties/extracted_text",
+         "type":"object",
+         "description":"An object whose keys are the text extraction tools run against the raw file.",
+         "properties":{
+            "tika":{
+               "$id":"#/properties/extracted_text/properties/tika",
+               "type":"string",
+               "description":"The text extracted from Tika (https://tika.apache.org/)",
+               "example":"Increased rain led to flooding in the region."
+            },
+            "pypdf2":{
+               "$id":"#/properties/extracted_text/properties/pypdf2",
+               "type":"string",
+               "description":"The text extracted from PyPDF2 (https://github.com/mstamy2/PyPDF2)",
+               "example":"Increased rain led to flooding in the region."
+            },
+            "bs4":{
+               "$id":"#/properties/extracted_text/properties/bs4",
+               "type":"string",
+               "description":"The text extracted from BeautifulSoup (https://www.crummy.com/software/BeautifulSoup/bs4/doc/)",
+               "example":"Increased rain led to flooding in the region."
+            }
+         }
+      },
+      "title":{
+         "$id":"#/properties/title",
+         "type":"string",
+         "description":"The title of the file",
+         "example":"South Sudan IDSR Annex - W39 2017 Sep 25-Oct 1_"
+      },      
+      "category":{
+         "$id":"#/properties/category",
+         "type":"string",
+         "description":"The document's human-understanable category",
+         "examples":[
+            "Migration",
+            "Food Security",
+            "Ethiopia"
+         ]
+      },
+      "source":{
+         "$id":"#/properties/source",
+         "type":"object",
+         "description":"An object containing information about the document's source.",
+         "properties":{
+            "author_name":{
+               "$id":"#/properties/source/properties/author_name",
+               "type":"string",
+               "description":"The name of the author",
+               "example":"Wamala Joseph Francis"
+            },
+            "publisher_name":{
+               "$id":"#/properties/source/properties/publisher_name",
+               "type":"string",
+               "description":"The name of the source publisher",
+               "example":"World Health Organization"
+            },
+            "organization_name":{
+               "$id":"#/properties/source/properties/organization_name",
+               "type":"string",
+               "description":"The name of the source organization",
+               "example":"South Sudan Health Cluster, WHO"
+            }             
+         }
+      },
+      "creation_date":{
+         "$id":"#/properties/creation_date",
+         "type":"object",
+         "description":"An object containing information about the document's creation date.",
+         "properties":{
+            "date":{
+               "$id":"#/properties/creation_date/properties/date",
+               "type":"string",
+               "description":"Raw date string",
+               "examples":[
+                  "2017-10-08T19:34:45Z",
+                  "June 1, 2018",
+                  "01/30/2019"
+               ]
+            },
+            "month":{
+               "$id":"#/properties/creation_date/properties/month",
+               "type":"integer",
+               "description":"Extracted month in integer format",
+               "example":2
+            },
+            "day":{
+               "$id":"#/properties/creation_date/properties/day",
+               "type":"integer",
+               "description":"Extracted day in integer format",
+               "example":30
+            },
+            "year":{
+               "$id":"#/properties/creation_date/properties/year",
+               "type":"integer",
+               "description":"Extracted year in integer format",
+               "example":2015
+            }
+         }
+      },      
+      "modification_date":{
+         "$id":"#/properties/modification_date",
+         "type":"object",
+         "description":"An object containing information about the document's latest modification date.",
+         "properties":{
+            "date":{
+               "$id":"#/properties/modification_date/properties/date",
+               "type":"string",
+               "description":"Raw date string",
+               "examples":[
+                  "2017-10-08T19:34:45Z",
+                  "June 1, 2018",
+                  "01/30/2019"
+               ]
+            },
+            "month":{
+               "$id":"#/properties/modification_date/properties/month",
+               "type":"integer",
+               "description":"Extracted month in integer format",
+               "example":2
+            },
+            "day":{
+               "$id":"#/properties/modification_date/properties/day",
+               "type":"integer",
+               "description":"Extracted day in integer format",
+               "example":30
+            },
+            "year":{
+               "$id":"#/properties/modification_date/properties/year",
+               "type":"integer",
+               "description":"Extracted year in integer format",
+               "example":2015
+            }
+         }
+      },   
+      "category":{
+         "$id":"#/properties/category",
+         "type":"string",
+         "examples":[
+            "migration",
+            "food security",
+            "conflict"
+         ]
+      }
+   }
+}
