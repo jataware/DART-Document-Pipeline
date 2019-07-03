@@ -12,6 +12,7 @@ from bs4 import BeautifulSoup
 from jsonschema import validate
 import warnings
 import re
+import requests
 
 warnings.filterwarnings("ignore", category=PyPDF2.utils.PdfReadWarning)
 
@@ -26,7 +27,7 @@ S3_BASE_KEY = 'documents/migration'
 BUCKET_NAME = 'world-modelers'
 
 # ELASTIC SEARCH CONFIG
-S3_INDEX = 'wm-dev'
+S3_INDEX = 'wm-dev-test'
 DOC_TYPE = 'wm-document'
 REGION = 'us-east-1'
 SERVICE = 'es'
@@ -165,21 +166,19 @@ def parse_document(file_path, category, source_url):
     
     return doc
 
-def get_filename_from_cd(cd):
+def get_filename(cd, url, title):
     """
     Get filename from content-disposition
     """
     if not cd:
-        return None
+        return os.path.basename(url) or f'{title}.html'
     fname = re.findall('filename=(.+)', cd)
     if len(fname) == 0:
-        return None
+        return os.path.basename(url) or f'{title}.html'
     return fname[0]
 
 
 def connect_to_es():
-    
-
     session = boto3.Session(region_name=REGION, profile_name='wmuser')
     credentials = session.get_credentials()
     credentials = credentials.get_frozen_credentials()
@@ -195,7 +194,7 @@ def connect_to_es():
         session_token=token
     )
     
-    es = Elasticsearch(
+    return Elasticsearch(
         hosts = [{'host': ES_HOST, 'port': 443}],
         http_auth=aws_auth,
         use_ssl=True,
@@ -206,7 +205,7 @@ def connect_to_es():
 def connect_to_s3():
     session = boto3.Session(profile_name=AWS_PROFILE)
     s3 = session.resource("s3")
-    s3_client = boto3.client("s3")
+    return boto3.client("s3")
 
 def main():
     es = connect_to_es()
@@ -230,7 +229,7 @@ def main():
                 print("Downloading - %s" % (sheet[f"D{row}"].value,))
                 r = requests.get(url_path, verify=False, stream=True, allow_redirects=True)
                 r.raw.decode_content = True
-                filename = f"./{TEMP_DOWNLOAD_PATH}/{get_filename_from_cd(r.headers.get('content-disposition'))}"
+                filename = f".{TEMP_DOWNLOAD_PATH}/{get_filename(r.headers.get('content-disposition'), url_path, doc_name)}"
                 
                 open(filename, 'wb').write(r.content)
                 #with open(f"{TEMP_DOWNLOAD_PATH}/{filename}", 'wb') as f:
