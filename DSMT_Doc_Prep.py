@@ -219,9 +219,9 @@ def main():
     for name in SHEET_NAMES:
         sheet = book[name]
         for row in range(2, sheet.max_row):
-            doc_name = sheet["A%s" % (row,)].value
-            url_path = sheet["D%s" % (row,)].value
-            doc_date = sheet["B%s" % (row,)].value
+            doc_name = sheet[f"A{row}"].value
+            url_path = sheet[f"D{row}"].value
+            doc_date = sheet[f"B{row}"].value
                     
             print(f"Processing - {doc_name}")
                         
