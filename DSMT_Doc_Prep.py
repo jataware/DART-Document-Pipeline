@@ -227,13 +227,17 @@ def main():
                         
             if 'http' in url_path:
                 print("Downloading - %s" % (sheet[f"D{row}"].value,))
-                r = requests.get(url_path, verify=False, stream=True, allow_redirects=True)
-                r.raw.decode_content = True
-                filename = f".{TEMP_DOWNLOAD_PATH}/{get_filename(r.headers.get('content-disposition'), url_path, doc_name)}"
-                
-                open(filename, 'wb').write(r.content)
-                #with open(f"{TEMP_DOWNLOAD_PATH}/{filename}", 'wb') as f:
-                #    shutil.copyfileobj(r.raw, f)    
+                try:
+                    r = requests.get(url_path, verify=False, stream=True, allow_redirects=True)
+                    r.raw.decode_content = True
+                    filename = f".{TEMP_DOWNLOAD_PATH}/{get_filename(r.headers.get('content-disposition'), url_path, doc_name)}"
+                    
+                    open(filename, 'wb').write(r.content)
+                    #with open(f"{TEMP_DOWNLOAD_PATH}/{filename}", 'wb') as f:
+                    #    shutil.copyfileobj(r.raw, f)
+                except Exception as e:
+                    print(f"Error Processing {doc_name} - {e}")
+                    
                 
                 count = 0    
                 s3_key = f"{S3_BASE_KEY}{TEMP_DOWNLOAD_PATH}"
