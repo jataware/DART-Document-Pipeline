@@ -1,5 +1,6 @@
 from flask import Flask
 from flask import request
+from flask import jsonify
 from flask_uploads import UploadSet, configure_uploads, DOCUMENTS
 import  openpyxl
 import boto3, json
@@ -228,7 +229,7 @@ def index_doc(es_index, doc_type, doc):
     es.index(index=es_index, doc_type=DOC_TYPE, id=doc.pop('_id'), body=doc)
 
 
-@app.route("/process_raw")
+@app.route("/process_raw", methods=['POST'])
 def process_raw():
     s3_client = connect_to_s3()
     es_index = request.form['index']
@@ -244,9 +245,17 @@ def process_raw():
     doc['stored_url'] = s3_uri
     
     index_doc(es_index, DOC_TYPE, doc)
+    return jsonify(
+        process_status='success',
+        filename=filename,
+        index=es_index
+    )
 
-@app.route("/process_remote")
+@app.route("/process_remote", methods=['POST'])
 def process_remote():
+    return jsonify(
+        request=request.form
+    )
     s3_client = connect_to_s3()
     es_index = request.form['index']
     url = request.form['url']
@@ -268,6 +277,13 @@ def process_remote():
     doc['stored_url'] = s3_uri
     
     index_doc(es_index, DOC_TYPE, doc)
+    
+    return jsonify(
+        process_status='success',
+        filename=filename,
+        url=url,
+        index=es_index
+    )
 
 if __name__ == '__main__':
     app.run(debug=True)
