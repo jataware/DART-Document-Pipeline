@@ -214,7 +214,7 @@ def main():
     # Ensure we are connected
     print(json.dumps(es.info(), indent=2))
     
-    schema = json.loads(open("document-schema.json").read())
+    schema = json.loads(open("../document-schema.json").read())
     book = openpyxl.load_workbook(SPREADSHEET)
     for name in SHEET_NAMES:
         sheet = book[name]
