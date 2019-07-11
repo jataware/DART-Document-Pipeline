@@ -18,20 +18,26 @@ warnings.filterwarnings("ignore", category=PyPDF2.utils.PdfReadWarning)
 
 TEMP_DOWNLOAD_PATH = '/tmp'
 
+# CONFIG
+
+config = configparser.ConfigParser()
+config.readfp(open(r'../config'))
+DOC_TYPE = config.get('ES', 'doc_type')
+
 # AWS CONFIG
-AWS_PROFILE = 'wmuser'
+AWS_PROFILE = config.get('AWS', 'profile')
 
 # S3 CONFIG
-S3_BASE_URL = 'https://world-modelers.s3.amazonaws.com'
-S3_BASE_KEY = 'documents/migration'
-BUCKET_NAME = 'world-modelers'
+S3_BASE_URL = config.get('S3', 'base_url')
+S3_BASE_KEY = config.get('S3', 'base_key')
+BUCKET_NAME = config.get('S3', 'bucket_name')
 
 # ELASTIC SEARCH CONFIG
-S3_INDEX = 'wm-dev-test'
-DOC_TYPE = 'wm-document'
-REGION = 'us-east-1'
-SERVICE = 'es'
-ES_HOST = 'search-world-modelers-dev-gjvcliqvo44h4dgby7tn3psw74.us-east-1.es.amazonaws.com'
+ES_INDEX = config.get('ES', 'index')
+DOC_TYPE = config.get('ES', 'doc_type')
+REGION = config.get('ES', 'region')
+SERVICE = config.get('ES', 'service')
+ES_HOST = config.get('ES', 'host')
 
 SPREADSHEET = 'Six_Twelve-Month_November_2019_Evaluation_Documents-Updated-6June2019.xlsx'
 SHEET_NAMES = [
@@ -269,11 +275,11 @@ def main():
                 #############################################  
                 
                 # create the index if it does not exist
-                if not es.indices.exists(S3_INDEX):
-                    es.indices.create(S3_INDEX)
-                    print(f"Created ES index: {S3_INDEX}")
+                if not es.indices.exists(ES_INDEX):
+                    es.indices.create(ES_INDEX)
+                    print(f"Created ES index: {ES_INDEX}")
                     
-                es.index(index=S3_INDEX, doc_type=DOC_TYPE, id=doc.pop('_id'), body=doc)
+                es.index(index=ES_INDEX, doc_type=DOC_TYPE, id=doc.pop('_id'), body=doc)
                 count += 1
                 if count % 25 == 0:
                     print(count)    

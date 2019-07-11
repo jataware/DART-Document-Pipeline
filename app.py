@@ -15,12 +15,18 @@ from jsonschema import validate
 import warnings
 import re
 import requests
+import configparser
 
 app = Flask(__name__)
 
 warnings.filterwarnings("ignore", category=PyPDF2.utils.PdfReadWarning)
 
 TEMP_DOWNLOAD_PATH = '/tmp'
+
+# CONFIG
+
+config = configparser.ConfigParser()
+config.readfp(open(r'config'))
 
 # UPLOADS
 
@@ -29,18 +35,18 @@ app.config['UPLOADED_DATAFILES_DEST'] = 'tmp'
 configure_uploads(app, DOCS)
 
 # AWS CONFIG
-AWS_PROFILE = 'wmuser'
+AWS_PROFILE = config.get('AWS', 'profile')
 
 # S3 CONFIG
-S3_BASE_URL = 'https://world-modelers.s3.amazonaws.com'
-S3_BASE_KEY = 'documents/migration'
-BUCKET_NAME = 'world-modelers'
+S3_BASE_URL = config.get('S3', 'base_url')
+S3_BASE_KEY = config.get('S3', 'base_key')
+BUCKET_NAME = config.get('S3', 'bucket_name')
 
 # ELASTIC SEARCH CONFIG
-DOC_TYPE = 'wm-document'
-REGION = 'us-east-1'
-SERVICE = 'es'
-ES_HOST = 'search-world-modelers-dev-gjvcliqvo44h4dgby7tn3psw74.us-east-1.es.amazonaws.com'
+DOC_TYPE = config.get('ES', 'doc_type')
+REGION = config.get('ES', 'region')
+SERVICE = config.get('ES', 'service')
+ES_HOST = config.get('ES', 'host')
 
 s3_key = f"{S3_BASE_KEY}{TEMP_DOWNLOAD_PATH}"
 s3_uri = f"{S3_BASE_URL}/{s3_key}"
