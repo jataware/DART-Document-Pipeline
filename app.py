@@ -253,9 +253,6 @@ def process_raw():
 
 @app.route("/process_remote", methods=['POST'])
 def process_remote():
-    return jsonify(
-        request=request.form
-    )
     s3_client = connect_to_s3()
     es_index = request.form['index']
     url = request.form['url']
