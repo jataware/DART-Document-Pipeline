@@ -9,6 +9,10 @@ pip install boto3==1.9.172
 pip install beautifulsoup4==4.5.3
 pip install requests
 pip install openpyxl
+pip install Flask
+pip install Flask-Uploads
 
 
 ## Running
+
+FLASK_APP=DSMT_Doc_Prep.py flask run
