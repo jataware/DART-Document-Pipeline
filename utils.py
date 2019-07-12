@@ -1,54 +1,3 @@
-from __future__ import print_function
-import  openpyxl
-import boto3, json
-import os
-from shutil import copyfile
-from hashlib import sha256
-from elasticsearch import Elasticsearch, RequestsHttpConnection
-from requests_aws4auth import AWS4Auth
-from tika import parser
-import PyPDF2
-from bs4 import BeautifulSoup
-from jsonschema import validate
-import warnings
-import re
-import requests
-
-warnings.filterwarnings("ignore", category=PyPDF2.utils.PdfReadWarning)
-
-TEMP_DOWNLOAD_PATH = '/tmp'
-
-# CONFIG
-
-config = configparser.ConfigParser()
-config.readfp(open(r'../config'))
-DOC_TYPE = config.get('ES', 'doc_type')
-
-# AWS CONFIG
-AWS_PROFILE = config.get('AWS', 'profile')
-
-# S3 CONFIG
-S3_BASE_URL = config.get('S3', 'base_url')
-S3_BASE_KEY = config.get('S3', 'base_key')
-BUCKET_NAME = config.get('S3', 'bucket_name')
-
-# ELASTIC SEARCH CONFIG
-ES_INDEX = config.get('ES', 'index')
-DOC_TYPE = config.get('ES', 'doc_type')
-REGION = config.get('ES', 'region')
-SERVICE = config.get('ES', 'service')
-ES_HOST = config.get('ES', 'host')
-
-SPREADSHEET = 'Six_Twelve-Month_November_2019_Evaluation_Documents-Updated-6June2019.xlsx'
-SHEET_NAMES = [
-    'Six-Month Evaluation Documents',
-    'Additional Six-Month Eval Docs',
-    'Twelve-Month Eval Docs',
-    'November 2019 SSudan Docs',
-    'November 2019 Ethiopia Docs',
-    'Luma-Provided Ethiopia Docs'
-]
-
 def extract_tika(file_path):
     """
     Take in a file path of a PDF and return its Tika extraction
@@ -172,20 +121,20 @@ def parse_document(file_path, category, source_url):
     
     return doc
 
-def get_filename(cd, url, title):
+def get_filename(cd, url):
     """
     Get filename from content-disposition
     """
     if not cd:
-        return os.path.basename(url) or f'{title}.html'
+        return os.path.basename(url)
     fname = re.findall('filename=(.+)', cd)
     if len(fname) == 0:
-        return os.path.basename(url) or f'{title}.html'
+        return os.path.basename(url)
     return fname[0]
 
 
-def connect_to_es():
-    session = boto3.Session(region_name=REGION, profile_name='wmuser')
+def connect_to_es(host, region, service):
+    session = boto3.Session(region_name=region, profile_name='wmuser')
     credentials = session.get_credentials()
     credentials = credentials.get_frozen_credentials()
     access_key = credentials.access_key
@@ -195,97 +144,34 @@ def connect_to_es():
     aws_auth = AWS4Auth(
         access_key,
         secret_key,
-        REGION,
-        SERVICE,
+        region,
+        service,
         session_token=token
     )
     
     return Elasticsearch(
-        hosts = [{'host': ES_HOST, 'port': 443}],
+        hosts = [{'host': host, 'port': 443}],
         http_auth=aws_auth,
         use_ssl=True,
         verify_certs=True,
         connection_class=RequestsHttpConnection
     )
 
-def connect_to_s3():
-    session = boto3.Session(profile_name=AWS_PROFILE)
+def upload_doc(aws_profile, filename, bucket, s3_key):
+    session = boto3.Session(profile_name=aws_profile)
     s3 = session.resource("s3")
-    return boto3.client("s3")
-
-def main():
-    es = connect_to_es()
-    s3_client = connect_to_s3()
+    s3_client = boto3.client("s3")
+    s3_client.upload_file(filename, bucket, f"{s3_key}/{filename}")
     
-    # Ensure we are connected
-    print(json.dumps(es.info(), indent=2))
+
+def index_doc(es_index, doc_type, doc, host, region, service):
+    es = connect_to_es(host, region, service)
+    schema = json.loads(open("document-schema.json").read())  
+    # Validate document against schema
+    validate(instance=doc, schema=schema)
+
+    if not es.indices.exists(es_index):
+        es.indices.create(es_index)
+        
+    es.index(index=es_index, doc_type=doc_type, id=doc.pop('_id'), body=doc)
     
-    schema = json.loads(open("../document-schema.json").read())
-    book = openpyxl.load_workbook(SPREADSHEET)
-    for name in SHEET_NAMES:
-        sheet = book[name]
-        for row in range(2, sheet.max_row):
-            doc_name = sheet[f"A{row}"].value
-            url_path = sheet[f"D{row}"].value
-            doc_date = sheet[f"B{row}"].value
-                    
-            print(f"Processing - {doc_name}")
-                        
-            if 'http' in url_path:
-                print("Downloading - %s" % (sheet[f"D{row}"].value,))
-                try:
-                    r = requests.get(url_path, verify=False, stream=True, allow_redirects=True)
-                    r.raw.decode_content = True
-                    filename = f".{TEMP_DOWNLOAD_PATH}/{get_filename(r.headers.get('content-disposition'), url_path, doc_name)}"
-                    
-                    open(filename, 'wb').write(r.content)
-                    #with open(f"{TEMP_DOWNLOAD_PATH}/{filename}", 'wb') as f:
-                    #    shutil.copyfileobj(r.raw, f)
-                except Exception as e:
-                    print(f"Error Processing {doc_name} - {e}")
-                    
-                
-                count = 0    
-                s3_key = f"{S3_BASE_KEY}{TEMP_DOWNLOAD_PATH}/{filename}"
-                s3_uri = f"{S3_BASE_URL}/{s3_key}"
-
-                #############################################
-                ### 1. Upload raw file to S3 ################
-                #############################################
-                s3_client.upload_file(filename, BUCKET_NAME, s3_key)
-                
-                
-                #############################################
-                ### 2. Parse document #######################
-                #############################################
-                # hard code category and source_url (empty) for the time being
-                title = doc_name
-                category = 'Migration'
-                source_url = url_path
-                creation_date = doc_date
-                doc = parse_document(filename, category, source_url)
-                doc['stored_url'] = s3_uri
-                
-                # Validate document against schema
-                validate(instance=doc, schema=schema)
-
-                
-                #############################################
-                ### 3. Index parsed document to Elasticsearch
-                #############################################  
-                
-                # create the index if it does not exist
-                if not es.indices.exists(ES_INDEX):
-                    es.indices.create(ES_INDEX)
-                    print(f"Created ES index: {ES_INDEX}")
-                    
-                es.index(index=ES_INDEX, doc_type=DOC_TYPE, id=doc.pop('_id'), body=doc)
-                count += 1
-                if count % 25 == 0:
-                    print(count)    
-            else:
-                print("Skipping due to incorrect URL")
-            
-
-if __name__ == '__main__':
-    main()

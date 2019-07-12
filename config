@@ -1,14 +1,14 @@
 [ES]
-doc_type = "wm-document"
-region = "us-east-1"
-service = "es"
-host = "search-world-modelers-dev-gjvcliqvo44h4dgby7tn3psw74.us-east-1.es.amazonaws.com"
-index = "wm-dev-test"
+doc_type = wm-document
+region = us-east-1
+service = es
+host = search-world-modelers-dev-gjvcliqvo44h4dgby7tn3psw74.us-east-1.es.amazonaws.com
+index = wm-dev-test
 
 [S3]
-base_url = "https://world-modelers.s3.amazonaws.com"
-base_key = "documents/migration"
-bucket_name = "world-modelers"
+base_url = https://world-modelers.s3.amazonaws.com
+base_key = documents/migration
+bucket_name = world-modelers
 
 [AWS]
-profile = "wmuser
+profile = wmuser
