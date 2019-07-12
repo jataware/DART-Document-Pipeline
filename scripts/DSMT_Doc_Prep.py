@@ -13,6 +13,7 @@ from jsonschema import validate
 import warnings
 import re
 import requests
+import configparser
 
 warnings.filterwarnings("ignore", category=PyPDF2.utils.PdfReadWarning)
 
@@ -236,7 +237,7 @@ def main():
                 try:
                     r = requests.get(url_path, verify=False, stream=True, allow_redirects=True)
                     r.raw.decode_content = True
-                    filename = f".{TEMP_DOWNLOAD_PATH}/{get_filename(r.headers.get('content-disposition'), url_path, doc_name)}"
+                    filename = f"{TEMP_DOWNLOAD_PATH}/{get_filename(r.headers.get('content-disposition'), url_path, doc_name)}"
                     
                     open(filename, 'wb').write(r.content)
                     #with open(f"{TEMP_DOWNLOAD_PATH}/{filename}", 'wb') as f:
@@ -246,8 +247,10 @@ def main():
                     
                 
                 count = 0    
-                s3_key = f"{S3_BASE_KEY}{TEMP_DOWNLOAD_PATH}/{filename}"
+                s3_key = f"{S3_BASE_KEY}{TEMP_DOWNLOAD_PATH}/{filename.split('/')[-1]}"
                 s3_uri = f"{S3_BASE_URL}/{s3_key}"
+                print(s3_key)
+                print(s3_uri)
 
                 #############################################
                 ### 1. Upload raw file to S3 ################

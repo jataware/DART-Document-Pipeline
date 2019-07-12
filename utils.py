@@ -1,3 +1,17 @@
+import boto3, json
+import os
+from shutil import copyfile
+from hashlib import sha256
+from elasticsearch import Elasticsearch, RequestsHttpConnection
+from requests_aws4auth import AWS4Auth
+from tika import parser
+import PyPDF2
+from bs4 import BeautifulSoup
+from jsonschema import validate
+import warnings
+import re
+import requests
+
 def extract_tika(file_path):
     """
     Take in a file path of a PDF and return its Tika extraction
@@ -133,8 +147,8 @@ def get_filename(cd, url):
     return fname[0]
 
 
-def connect_to_es(host, region, service):
-    session = boto3.Session(region_name=region, profile_name='wmuser')
+def connect_to_es(profile, host, region, service):
+    session = boto3.Session(region_name=region, profile_name=profile)
     credentials = session.get_credentials()
     credentials = credentials.get_frozen_credentials()
     access_key = credentials.access_key
@@ -157,15 +171,15 @@ def connect_to_es(host, region, service):
         connection_class=RequestsHttpConnection
     )
 
-def upload_doc(aws_profile, filename, bucket, s3_key):
-    session = boto3.Session(profile_name=aws_profile)
+def upload_doc(profile, region, filename, username, bucket, s3_key):
+    session = boto3.Session(region_name=region, profile_name=profile)
     s3 = session.resource("s3")
     s3_client = boto3.client("s3")
-    s3_client.upload_file(filename, bucket, f"{s3_key}/{filename}")
+    s3_client.upload_file(filename, bucket, f"{s3_key}/{username}/{filename.split('/')[-1]}")
     
 
-def index_doc(es_index, doc_type, doc, host, region, service):
-    es = connect_to_es(host, region, service)
+def index_doc(es_index, doc_type, doc, profile, host, region, service):
+    es = connect_to_es(profile, host, region, service)
     schema = json.loads(open("document-schema.json").read())  
     # Validate document against schema
     validate(instance=doc, schema=schema)

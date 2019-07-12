@@ -58,7 +58,7 @@ S3_URI = f"{S3_BASE_URL}/{S3_KEY}"
 def process_raw():
     es_index = request.form['index']
     filename = DOCS.save(request.files['user_file'])
-    upload_doc(AWS_PROFILE, filename, BUCKET_NAME, S3_KEY)
+    upload_doc(AWS_PROFILE, REGION, filename, request.form['username'], BUCKET_NAME, S3_KEY)
     
     title = filename
     category = 'Migration'
@@ -67,7 +67,7 @@ def process_raw():
     doc = parse_document(filename, category, source_url)
     doc['stored_url'] = S3_URI
     
-    index_doc(es_index, DOC_TYPE, doc, ES_HOST, REGION, SERVICE)
+    index_doc(es_index, DOC_TYPE, doc, AWS_PROFILE, ES_HOST, REGION, SERVICE)
     return jsonify(
         process_status='success',
         filename=filename,
@@ -81,12 +81,12 @@ def process_remote():
     try:
         r = requests.get(url, verify=False, stream=True, allow_redirects=True)
         r.raw.decode_content = True
-        filename = f".{TEMP_DOWNLOAD_PATH}/{get_filename(r.headers.get('content-disposition'), url)}"
+        filename = f"{TEMP_DOWNLOAD_PATH}/{get_filename(r.headers.get('content-disposition'), url)}"
         open(filename, 'wb').write(r.content)
     except Exception as e:
         print(f"Error Processing {url} - {e}")
 
-    upload_doc(AWS_PROFILE, filename, BUCKET_NAME, S3_KEY)
+    upload_doc(AWS_PROFILE, REGION, filename, request.form['username'], BUCKET_NAME, S3_KEY)
     
     title = url
     category = 'Migration'
@@ -95,7 +95,7 @@ def process_remote():
     doc = parse_document(filename, category, source_url)
     doc['stored_url'] = S3_URI
     
-    index_doc(es_index, DOC_TYPE, doc, ES_HOST, REGION, SERVICE)
+    index_doc(es_index, DOC_TYPE, doc, AWS_PROFILE, ES_HOST, REGION, SERVICE)
     
     return jsonify(
         process_status='success',
