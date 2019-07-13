@@ -78,13 +78,10 @@ def process_raw():
 def process_remote():
     es_index = request.form['index']
     url = request.form['url']
-    try:
-        r = requests.get(url, verify=False, stream=True, allow_redirects=True)
-        r.raw.decode_content = True
-        filename = f"{TEMP_DOWNLOAD_PATH}/{get_filename(r.headers.get('content-disposition'), url)}"
-        open(filename, 'wb').write(r.content)
-    except Exception as e:
-        print(f"Error Processing {url} - {e}")
+    r = requests.get(url, verify=False, stream=True, allow_redirects=True)
+    r.raw.decode_content = True
+    filename = f"{TEMP_DOWNLOAD_PATH}/{get_filename(r.headers.get('content-disposition'), url)}"
+    open(filename, 'wb').write(r.content)
 
     upload_doc(AWS_PROFILE, REGION, filename, request.form['username'], BUCKET_NAME, S3_KEY)
     

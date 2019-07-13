@@ -139,12 +139,10 @@ def get_filename(cd, url):
     """
     Get filename from content-disposition
     """
-    if not cd:
-        return os.path.basename(url)
+    if (not cd) or len(re.findall('filename=(.+)', cd)) == 0:
+        return f"{os.path.basename(url)}{'.html' if '.' not in os.path.basename(url) else ''}"
     fname = re.findall('filename=(.+)', cd)
-    if len(fname) == 0:
-        return os.path.basename(url)
-    return fname[0]
+    return f"{fname[0]}{'.html' if '.' not in fname[0] else ''}"
 
 
 def connect_to_es(profile, host, region, service):
