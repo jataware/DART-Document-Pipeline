@@ -18,4 +18,4 @@ pip install Flask-Uploads
 
 ## Running
 
-FLASK_APP=DSMT_Doc_Prep.py flask run
+FLASK_APP=app.py python app.py
