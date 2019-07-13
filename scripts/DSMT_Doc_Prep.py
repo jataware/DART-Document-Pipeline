@@ -226,61 +226,64 @@ def main():
     for name in SHEET_NAMES:
         sheet = book[name]
         for row in range(2, sheet.max_row):
-            doc_name = sheet[f"A{row}"].value
-            url_path = sheet[f"D{row}"].value
-            doc_date = sheet[f"B{row}"].value
-                    
-            print(f"Processing - {doc_name}")
+            try:
+                doc_name = sheet[f"A{row}"].value
+                url_path = sheet[f"D{row}"].value
+                doc_date = sheet[f"B{row}"].value
                         
-            if 'http' in url_path:
-                print("Downloading - %s" % (sheet[f"D{row}"].value,))
-                r = requests.get(url_path, verify=False, stream=True, allow_redirects=True)
-                r.raw.decode_content = True
-                filename = f"{TEMP_DOWNLOAD_PATH}/{slugify(get_filename(r.headers.get('content-disposition'), url_path, doc_name))}"
-                
-                open(filename, 'wb').write(r.content)
-                count = 0    
-                s3_key = f"{S3_BASE_KEY}{TEMP_DOWNLOAD_PATH}/DEV/{filename.split('/')[-1]}"
-                s3_uri = f"{S3_BASE_URL}/{s3_key}"
-                print(s3_key)
-                print(s3_uri)
-
-                #############################################
-                ### 1. Upload raw file to S3 ################
-                #############################################
-                s3_client.upload_file(filename, BUCKET_NAME, s3_key)
-                
-                
-                #############################################
-                ### 2. Parse document #######################
-                #############################################
-                # hard code category and source_url (empty) for the time being
-                title = doc_name
-                category = 'Migration'
-                source_url = url_path
-                creation_date = doc_date
-                doc = parse_document(filename, category, source_url)
-                doc['stored_url'] = s3_uri
-                
-                # Validate document against schema
-                validate(instance=doc, schema=schema)
-
-                
-                #############################################
-                ### 3. Index parsed document to Elasticsearch
-                #############################################  
-                
-                # create the index if it does not exist
-                if not es.indices.exists(ES_INDEX):
-                    es.indices.create(ES_INDEX)
-                    print(f"Created ES index: {ES_INDEX}")
+                print(f"Processing - {doc_name}")
+                            
+                if 'http' in url_path:
+                    print("Downloading - %s" % (sheet[f"D{row}"].value,))
+                    r = requests.get(url_path, verify=False, stream=True, allow_redirects=True)
+                    r.raw.decode_content = True
+                    filename = f"{TEMP_DOWNLOAD_PATH}/{slugify(get_filename(r.headers.get('content-disposition'), url_path, doc_name))}"
                     
-                es.index(index=ES_INDEX, doc_type=DOC_TYPE, id=doc.pop('_id'), body=doc)
-                count += 1
-                if count % 25 == 0:
-                    print(count)    
-            else:
-                print("Skipping due to incorrect URL")
+                    open(filename, 'wb').write(r.content)
+                    count = 0    
+                    s3_key = f"{S3_BASE_KEY}{TEMP_DOWNLOAD_PATH}/DEV/{filename.split('/')[-1]}"
+                    s3_uri = f"{S3_BASE_URL}/{s3_key}"
+                    print(s3_key)
+                    print(s3_uri)
+
+                    #############################################
+                    ### 1. Upload raw file to S3 ################
+                    #############################################
+                    s3_client.upload_file(filename, BUCKET_NAME, s3_key)
+                    
+                    
+                    #############################################
+                    ### 2. Parse document #######################
+                    #############################################
+                    # hard code category and source_url (empty) for the time being
+                    title = doc_name
+                    category = 'Migration'
+                    source_url = url_path
+                    creation_date = doc_date
+                    doc = parse_document(filename, category, source_url)
+                    doc['stored_url'] = s3_uri
+                    
+                    # Validate document against schema
+                    validate(instance=doc, schema=schema)
+
+                    
+                    #############################################
+                    ### 3. Index parsed document to Elasticsearch
+                    #############################################  
+                    
+                    # create the index if it does not exist
+                    if not es.indices.exists(ES_INDEX):
+                        es.indices.create(ES_INDEX)
+                        print(f"Created ES index: {ES_INDEX}")
+                        
+                    es.index(index=ES_INDEX, doc_type=DOC_TYPE, id=doc.pop('_id'), body=doc)
+                    count += 1
+                    if count % 25 == 0:
+                        print(count)    
+                else:
+                    print("Skipping due to incorrect URL")
+            except Exception as e:
+                print(f"Error processing row # {row} - {e}")
             
 
 if __name__ == '__main__':
