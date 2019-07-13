@@ -173,16 +173,16 @@ def parse_document(file_path, category, source_url):
     
     return doc
 
+def slugify(value):
+    return ''.join([c for c in value if c.isalpha() or c.isdigit() or c ==' ' or c == '.']).rstrip()
+
 def get_filename(cd, url, title):
-    """
-    Get filename from content-disposition
-    """
     if not cd:
-        return os.path.basename(url) or f'{title}.html'
+        return f"{os.path.basename(url)[:225].strip()}{'.html' if '.' not in os.path.basename(url)[:225] else ''}" or f'{title[:225]}.html'
     fname = re.findall('filename=(.+)', cd)
     if len(fname) == 0:
-        return os.path.basename(url) or f'{title}.html'
-    return fname[0]
+        return f"{os.path.basename(url)[:225].strip()}{'.html' if '.' not in os.path.basename(url)[:225] else ''}" or f'{title[:225]}.html'
+    return f"{fname[0].strip()}{'.html' if '.' not in fname[0] else ''}"
 
 
 def connect_to_es():
@@ -234,20 +234,13 @@ def main():
                         
             if 'http' in url_path:
                 print("Downloading - %s" % (sheet[f"D{row}"].value,))
-                try:
-                    r = requests.get(url_path, verify=False, stream=True, allow_redirects=True)
-                    r.raw.decode_content = True
-                    filename = f"{TEMP_DOWNLOAD_PATH}/{get_filename(r.headers.get('content-disposition'), url_path, doc_name)}"
-                    
-                    open(filename, 'wb').write(r.content)
-                    #with open(f"{TEMP_DOWNLOAD_PATH}/{filename}", 'wb') as f:
-                    #    shutil.copyfileobj(r.raw, f)
-                except Exception as e:
-                    print(f"Error Processing {doc_name} - {e}")
-                    
+                r = requests.get(url_path, verify=False, stream=True, allow_redirects=True)
+                r.raw.decode_content = True
+                filename = f"{TEMP_DOWNLOAD_PATH}/{slugify(get_filename(r.headers.get('content-disposition'), url_path, doc_name))}"
                 
+                open(filename, 'wb').write(r.content)
                 count = 0    
-                s3_key = f"{S3_BASE_KEY}{TEMP_DOWNLOAD_PATH}/{filename.split('/')[-1]}"
+                s3_key = f"{S3_BASE_KEY}{TEMP_DOWNLOAD_PATH}/DEV/{filename.split('/')[-1]}"
                 s3_uri = f"{S3_BASE_URL}/{s3_key}"
                 print(s3_key)
                 print(s3_uri)

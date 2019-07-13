@@ -135,10 +135,10 @@ def parse_document(file_path, category, source_url):
     
     return doc
 
+def slugify(value):
+    return ''.join([c for c in value if c.isalpha() or c.isdigit() or c ==' ' or c == '.']).rstrip()
+
 def get_filename(cd, url):
-    """
-    Get filename from content-disposition
-    """
     if (not cd) or len(re.findall('filename=(.+)', cd)) == 0:
         return f"{os.path.basename(url)}{'.html' if '.' not in os.path.basename(url) else ''}"
     fname = re.findall('filename=(.+)', cd)

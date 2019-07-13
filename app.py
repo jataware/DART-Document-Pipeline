@@ -80,7 +80,7 @@ def process_remote():
     url = request.form['url']
     r = requests.get(url, verify=False, stream=True, allow_redirects=True)
     r.raw.decode_content = True
-    filename = f"{TEMP_DOWNLOAD_PATH}/{get_filename(r.headers.get('content-disposition'), url)}"
+    filename = f"{TEMP_DOWNLOAD_PATH}/{slugify(get_filename(r.headers.get('content-disposition'), url))}"
     open(filename, 'wb').write(r.content)
 
     upload_doc(AWS_PROFILE, REGION, filename, request.form['username'], BUCKET_NAME, S3_KEY)
