@@ -18,6 +18,7 @@ pip install lxml
 ```
 pip install Flask
 pip install Flask-Uploads
+pip install jsonschema
 ```
 
 
