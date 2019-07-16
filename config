@@ -3,7 +3,7 @@ doc_type = wm-document
 region = us-east-1
 service = es
 host = search-world-modelers-dev-gjvcliqvo44h4dgby7tn3psw74.us-east-1.es.amazonaws.com
-index = wm-dev-test
+index = wm-dev
 
 [S3]
 base_url = https://world-modelers.s3.amazonaws.com

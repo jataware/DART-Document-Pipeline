@@ -13,9 +13,12 @@ from jsonschema import validate
 import warnings
 import re
 import requests
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 import configparser
 
 warnings.filterwarnings("ignore", category=PyPDF2.utils.PdfReadWarning)
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 TEMP_DOWNLOAD_PATH = '/tmp'
 
@@ -228,14 +231,21 @@ def main():
         for row in range(2, sheet.max_row):
             try:
                 doc_name = sheet[f"A{row}"].value
-                url_path = sheet[f"D{row}"].value
+                url_path = sheet[f"D{row}"].value.split('?')[0]
                 doc_date = sheet[f"B{row}"].value
-                        
-                print(f"Processing - {doc_name}")
-                            
-                if 'http' in url_path:
-                    print("Downloading - %s" % (sheet[f"D{row}"].value,))
-                    r = requests.get(url_path, verify=False, stream=True, allow_redirects=True)
+                query = {
+                    "query": {
+                        "match" : {
+                            "source_url.keyword" : url_path
+                        }
+                    }
+                }            
+                
+                es_count = es.count(index=ES_INDEX, body=query)['count']
+                if es_count < 1:
+                    print(f"Processing - {doc_name}")
+                    print("Downloading - %s" % (url_path,))
+                    r = requests.get(url_path.strip(), verify=False, allow_redirects=True)
                     r.raw.decode_content = True
                     filename = f"{TEMP_DOWNLOAD_PATH}/{slugify(get_filename(r.headers.get('content-disposition'), url_path, doc_name))}"
                     
@@ -243,35 +253,17 @@ def main():
                     count = 0    
                     s3_key = f"{S3_BASE_KEY}{TEMP_DOWNLOAD_PATH}/DEV/{filename.split('/')[-1]}"
                     s3_uri = f"{S3_BASE_URL}/{s3_key}"
-                    print(s3_key)
-                    print(s3_uri)
-
-                    #############################################
-                    ### 1. Upload raw file to S3 ################
-                    #############################################
                     s3_client.upload_file(filename, BUCKET_NAME, s3_key)
                     
-                    
-                    #############################################
-                    ### 2. Parse document #######################
-                    #############################################
-                    # hard code category and source_url (empty) for the time being
                     title = doc_name
-                    category = 'Migration'
+                    category = name
                     source_url = url_path
                     creation_date = doc_date
                     doc = parse_document(filename, category, source_url)
                     doc['stored_url'] = s3_uri
                     
-                    # Validate document against schema
                     validate(instance=doc, schema=schema)
 
-                    
-                    #############################################
-                    ### 3. Index parsed document to Elasticsearch
-                    #############################################  
-                    
-                    # create the index if it does not exist
                     if not es.indices.exists(ES_INDEX):
                         es.indices.create(ES_INDEX)
                         print(f"Created ES index: {ES_INDEX}")
@@ -280,8 +272,6 @@ def main():
                     count += 1
                     if count % 25 == 0:
                         print(count)    
-                else:
-                    print("Skipping due to incorrect URL")
             except Exception as e:
                 print(f"Error processing row # {row} - {e}")
             
