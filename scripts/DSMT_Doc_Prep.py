@@ -14,13 +14,18 @@ import warnings
 import re
 import requests
 import urllib3
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+import magic
 import configparser
+from PIL import Image 
+import pytesseract 
+import sys 
+from pdf2image import convert_from_path 
 
 warnings.filterwarnings("ignore", category=PyPDF2.utils.PdfReadWarning)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 TEMP_DOWNLOAD_PATH = '/tmp'
+ERRORS = []
 
 # CONFIG
 
@@ -121,13 +126,34 @@ def parse_pdfinfo(tika_metadata, doc, file_path):
         doc['modification_date'] = {'date': last_modified}
     return doc
 
+def extract_pytesseract(file_path):
+    pages = convert_from_path(file_path, 500)
+    out_text = ""
+    image_counter = 1    
+    for page in pages: 
+        filename = f"{TEMP_DOWNLOAD_PATH}/page_{str(image_counter)}.jpg"
+        page.save(filename, 'JPEG')     
+        image_counter = image_counter + 1
+    
+    filelimit = image_counter-1
+    
+    for i in range(1, filelimit + 1): 
+        filename = f"{TEMP_DOWNLOAD_PATH}/page_{str(i)}.jpg"            
+        text = str(((pytesseract.image_to_string(Image.open(filename))))) 
+        text = text.replace('-\n', '')         
+        out_text += text
+
+    return out_text
+
+
 def parse_document(file_path, category, source_url):
     """
     Take in the full path to a file and perform appropriate text extrraction
     as well as metadata enrichment (if a PDF, using pdfinfo fields)
     """
-    file_name = os.path.basename(file_path)
-    file_type = os.path.splitext(file_path)[1]
+    file_name = file_path.split('/')[-1]
+    mime = magic.Magic(mime=True)
+    file_type = mime.from_file(file_path).split('/')[-1]
     
     # sha256 hash the raw contents of the file to generate a UUID
     raw = open(file_path,'rb').read()
@@ -145,8 +171,8 @@ def parse_document(file_path, category, source_url):
     # if we are able to extract pdfinfo with Tika
     tika_metadata = None
     
-    if file_type == '.pdf':
-        doc['file_type'] = file_type
+    if 'pdf' in file_type or 'xml' in file_type:
+        doc['file_type'] = 'pdf'
         try:
             tika_extraction, tika_metadata = extract_tika(file_path)
             extracted_text['tika'] = tika_extraction
@@ -163,29 +189,43 @@ def parse_document(file_path, category, source_url):
             extracted_text['pypdf2'] = extract_pypdf2(file_path)
         except Exception as e:
             print(f"PyPDF2 extraction failed: {e}")
-    elif file_type == '.html':
+        try:
+            extracted_text['pytesseract'] = extract_pytesseract(file_path)
+        except Exception as e:
+            print(f"PyTesseract extraction failed: {e}")
+    elif 'html' in file_type or 'text' in file_type:
+        doc['file_type'] = 'html'
         try:
             extracted_text['bs4'] = extract_bs4(file_path)
         except Exception as e:
             print(f"BS4 extraction failed: {e}")
+    else:
+        if file_name != 'urlsatrctjqesrcssourcewebcd3ved0ahUKEwiL15Wux4XbAhWFhOAKHWIcAdEQFggxMAIurlhttp3A2F2Fwww.html':
+            raise ValueError("*** Could not find extractor for "+file_name+" with mime type - "+file_type)
     
     if tika_metadata:
         doc = parse_pdfinfo(tika_metadata, doc, file_path)
     
     doc['extracted_text'] = extracted_text
+    bs4_len = len(extracted_text.get('bs4') or '')
+    tika_len = len(extracted_text.get('tika') or '')
+    pypdf2_len = len(extracted_text.get('pypdf2') or '')
+    pytesseract_len = len(extracted_text.get('pytesseract') or '')
+    if bs4_len < 500 and tika_len < 500 and pypdf2_len < 500 and pytesseract_len < 500:
+        ERRORS.append("*** Error extracted_text for "+file_name+" with type "+file_type+" is less than 500 chars - "+json.dumps(extracted_text))
+        if file_name != 'urlsatrctjqesrcssourcewebcd3ved0ahUKEwiL15Wux4XbAhWFhOAKHWIcAdEQFggxMAIurlhttp3A2F2Fwww.html':
+            raise ValueError('ERRORS --- ' + json.dumps(ERRORS))
     
     return doc
 
 def slugify(value):
     return ''.join([c for c in value if c.isalpha() or c.isdigit() or c ==' ' or c == '.']).rstrip()
 
-def get_filename(cd, url, title):
-    if not cd:
-        return f"{os.path.basename(url)[:225].strip()}{'.html' if '.' not in os.path.basename(url)[:225] else ''}" or f'{title[:225]}.html'
-    fname = re.findall('filename=(.+)', cd)
-    if len(fname) == 0:
-        return f"{os.path.basename(url)[:225].strip()}{'.html' if '.' not in os.path.basename(url)[:225] else ''}" or f'{title[:225]}.html'
-    return f"{fname[0].strip()}{'.html' if '.' not in fname[0] else ''}"
+def get_filename(req, url):
+    header = req.headers
+    content_type = header.get('content-type')
+    ext = content_type.split(';')[0].split('/')[-1]
+    return f"{url.split('/')[-1][:225].split('.')[0]}.{ext}"
 
 
 def connect_to_es():
@@ -220,6 +260,9 @@ def connect_to_s3():
 def main():
     es = connect_to_es()
     s3_client = connect_to_s3()
+    if not es.indices.exists(ES_INDEX):
+        es.indices.create(ES_INDEX)
+        print(f"Created ES index: {ES_INDEX}")
     
     # Ensure we are connected
     print(json.dumps(es.info(), indent=2))
@@ -229,51 +272,50 @@ def main():
     for name in SHEET_NAMES:
         sheet = book[name]
         for row in range(2, sheet.max_row):
-            try:
-                doc_name = sheet[f"A{row}"].value
-                url_path = sheet[f"D{row}"].value.split('?')[0]
-                doc_date = sheet[f"B{row}"].value
-                query = {
-                    "query": {
-                        "match" : {
-                            "source_url.keyword" : url_path
-                        }
+            doc_name = sheet[f"A{row}"].value
+            url_path = sheet[f"D{row}"].value.strip()
+            doc_date = sheet[f"B{row}"].value
+            query = {
+                "query": {
+                    "match" : {
+                        "source_url.keyword" : url_path
                     }
-                }            
+                }
+            }            
+            
+            es_count = es.count(index=ES_INDEX, body=query)['count']
+            if es_count < 1 and url_path != 'https://www.unicef.org/eapro/Brief_Nutrition_Overview.pdf' and url_path != 'http://documents.wfp.org/stellent/groups/public/documents/ena/wfp284277.pdf?_ga=2.110714181.1951289426.1518533341-841502227.1498664735':
+                print(f"Processing - {doc_name}")
+                print("Downloading - %s" % (url_path,))
+                try:
+                    r = requests.get(url_path, verify=False, stream=True, allow_redirects=True, timeout=30)
+                except Exception as e:
+                    try:
+                        r = requests.get(url_path.replace('http://', 'https://'), verify=False, stream=True, allow_redirects=True, timeout=30)
+                    except Exception as e:
+                        r = requests.get(url_path.replace('www.', ''), verify=False, stream=True, allow_redirects=True, timeout=30)
+                r.raw.decode_content = True
+                filename = f"{TEMP_DOWNLOAD_PATH}/{slugify(get_filename(r, url_path))}"
+                open(filename, 'wb').write(r.content)
+                count = 0    
+                s3_key = f"{S3_BASE_KEY}{TEMP_DOWNLOAD_PATH}/DEV/{filename.split('/')[-1]}"
+                s3_uri = f"{S3_BASE_URL}/{s3_key}"
+                s3_client.upload_file(filename, BUCKET_NAME, s3_key)
                 
-                es_count = es.count(index=ES_INDEX, body=query)['count']
-                if es_count < 1:
-                    print(f"Processing - {doc_name}")
-                    print("Downloading - %s" % (url_path,))
-                    r = requests.get(url_path.strip(), verify=False, allow_redirects=True)
-                    r.raw.decode_content = True
-                    filename = f"{TEMP_DOWNLOAD_PATH}/{slugify(get_filename(r.headers.get('content-disposition'), url_path, doc_name))}"
+                title = doc_name
+                category = name
+                source_url = url_path
+                creation_date = doc_date
+                doc = parse_document(filename, category, source_url)
+                doc['stored_url'] = s3_uri
+                
+                validate(instance=doc, schema=schema)
                     
-                    open(filename, 'wb').write(r.content)
-                    count = 0    
-                    s3_key = f"{S3_BASE_KEY}{TEMP_DOWNLOAD_PATH}/DEV/{filename.split('/')[-1]}"
-                    s3_uri = f"{S3_BASE_URL}/{s3_key}"
-                    s3_client.upload_file(filename, BUCKET_NAME, s3_key)
-                    
-                    title = doc_name
-                    category = name
-                    source_url = url_path
-                    creation_date = doc_date
-                    doc = parse_document(filename, category, source_url)
-                    doc['stored_url'] = s3_uri
-                    
-                    validate(instance=doc, schema=schema)
-
-                    if not es.indices.exists(ES_INDEX):
-                        es.indices.create(ES_INDEX)
-                        print(f"Created ES index: {ES_INDEX}")
-                        
-                    es.index(index=ES_INDEX, doc_type=DOC_TYPE, id=doc.pop('_id'), body=doc)
-                    count += 1
-                    if count % 25 == 0:
-                        print(count)    
-            except Exception as e:
-                print(f"Error processing row # {row} - {e}")
+                es.index(index=ES_INDEX, doc_type=DOC_TYPE, id=doc.pop('_id'), body=doc)
+                count += 1
+                if count % 25 == 0:
+                    print(count)    
+    print('ERRORS --- ' + json.dumps(ERRORS))
             
 
 if __name__ == '__main__':

@@ -12,6 +12,15 @@ pip install requests
 pip install openpyxl
 pip install configparser
 pip install lxml
+pip install libmagic
+pip install python-magic
+pip install python-magic-bin
+pip install Pillow
+pip install pytesseract
+pip install pdf2image
+
+brew install tesseract
+brew install poppler
 ```
   
 ## Additional API Build Requirements
