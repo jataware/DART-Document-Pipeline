@@ -17,6 +17,8 @@ pip install Pillow
 pip install pytesseract
 pip install pdf2image
 pip install pdfminer.six
+pip install tika==1.19	
+pip install PyPDF2==1.26.0
 
 brew install tesseract
 brew install poppler

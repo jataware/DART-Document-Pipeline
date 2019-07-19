@@ -59,6 +59,10 @@ REGION = config.get('ES', 'region')
 SERVICE = config.get('ES', 'service')
 ES_HOST = config.get('ES', 'host')
 
+# LOGGING
+FAILURE_FILE = config.get('LOGGING', 'fail')
+SUCCESS_FILE = config.get('LOGGING', 'success')
+
 SPREADSHEET = 'Six_Twelve-Month_November_2019_Evaluation_Documents-Updated-6June2019.xlsx'
 SHEET_NAMES = [
     'Six-Month Evaluation Documents',
@@ -370,44 +374,55 @@ def main():
     
     schema = json.loads(open("../document-schema.json").read())
     book = openpyxl.load_workbook(SPREADSHEET)
+    failed = openpyxl.load_workbook(SPREADSHEET)
+    success = openpyxl.load_workbook(SPREADSHEET)
     for name in SHEET_NAMES:
         sheet = book[name]
         for row in range(2, sheet.max_row):
-            doc_name = sheet[f"A{row}"].value
-            url_path = sheet[f"D{row}"].value.strip()
-            doc_date = sheet[f"B{row}"].value
-            query = {
-                "query": {
-                    "match" : {
-                        "source_url.keyword" : url_path
+            try:
+                doc_name = sheet[f"A{row}"].value
+                url_path = sheet[f"D{row}"].value.strip()
+                doc_date = sheet[f"B{row}"].value
+                query = {
+                    "query": {
+                        "match" : {
+                            "source_url.keyword" : url_path
+                        }
                     }
-                }
-            }            
-            
-            es_count = es.count(index=ES_INDEX, body=query)['count']
-            if es_count < 1:
-                print(f"Processing - {doc_name}")
-                print("Downloading - %s" % (url_path,))
-                r = requests.get(url_path, verify=False, stream=True, allow_redirects=True)
-                r.raw.decode_content = True
-                filename = f"{TEMP_DOWNLOAD_PATH}/{slugify(get_filename(r, url_path))}"
-                open(filename, 'wb').write(r.content)
-                count = 0    
-                s3_key = f"{S3_BASE_KEY}{TEMP_DOWNLOAD_PATH}/DEV/{filename.split('/')[-1]}"
-                s3_uri = f"{S3_BASE_URL}/{s3_key}"
-                s3_client.upload_file(filename, BUCKET_NAME, s3_key)
+                }            
                 
-                title = doc_name
-                category = name
-                source_url = url_path
-                creation_date = doc_date
-                doc = parse_document(filename, category, source_url)
-                doc['stored_url'] = s3_uri
-                
-                validate(instance=doc, schema=schema)
+                es_count = es.count(index=ES_INDEX, body=query)['count']
+                if es_count < 1:
+                    print(f"Processing - {doc_name}")
+                    print("Downloading - %s" % (url_path,))
+                    r = requests.get(url_path, verify=False, stream=True, allow_redirects=True)
+                    r.raw.decode_content = True
+                    filename = f"{TEMP_DOWNLOAD_PATH}/{slugify(get_filename(r, url_path))}"
+                    open(filename, 'wb').write(r.content)
+                    count = 0    
+                    s3_key = f"{S3_BASE_KEY}{TEMP_DOWNLOAD_PATH}/DEV/{filename.split('/')[-1]}"
+                    s3_uri = f"{S3_BASE_URL}/{s3_key}"
+                    s3_client.upload_file(filename, BUCKET_NAME, s3_key)
                     
-                es.index(index=ES_INDEX, doc_type=DOC_TYPE, id=doc.pop('_id'), body=doc)
-                print(f"Finished processing row# {row} out of {sheet.max_row} in sheet {name}")   
+                    title = doc_name
+                    category = name
+                    source_url = url_path
+                    creation_date = doc_date
+                    doc = parse_document(filename, category, source_url)
+                    doc['stored_url'] = s3_uri
+                    
+                    validate(instance=doc, schema=schema)
+                        
+                    es.index(index=ES_INDEX, doc_type=DOC_TYPE, id=doc.pop('_id'), body=doc)
+                    print(f"Finished processing row# {row} out of {sheet.max_row} in sheet {name}")
+                    failed[name].delete_row(row)
+                    failed.save(FAILURE_FILE)
+            except Exception as e:
+                success[name].delete_rows(row)
+                success[name][f"E{row}"] = e
+                success.save(SUCCESS_FILE)
+                print(f"Failed processing row# {row} out of {sheet.max_row} in sheet {name} -- {e}")
+    
     print('ERRORS --- ' + json.dumps(ERRORS))
             
 

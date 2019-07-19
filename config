@@ -12,3 +12,7 @@ bucket_name = world-modelers
 
 [AWS]
 profile = wmuser
+
+[LOGGING]
+fail=failures.xlsx
+success=success.xlsx
