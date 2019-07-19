@@ -14,5 +14,4 @@ bucket_name = world-modelers
 profile = wmuser
 
 [LOGGING]
-fail=failures.xlsx
-success=success.xlsx
+fail_file=failures.xlsx

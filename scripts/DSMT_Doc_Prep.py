@@ -60,8 +60,7 @@ SERVICE = config.get('ES', 'service')
 ES_HOST = config.get('ES', 'host')
 
 # LOGGING
-FAILURE_FILE = config.get('LOGGING', 'fail')
-SUCCESS_FILE = config.get('LOGGING', 'success')
+FAILURE_FILE = config.get('LOGGING', 'fail_file')
 
 SPREADSHEET = 'Six_Twelve-Month_November_2019_Evaluation_Documents-Updated-6June2019.xlsx'
 SHEET_NAMES = [
@@ -375,7 +374,6 @@ def main():
     schema = json.loads(open("../document-schema.json").read())
     book = openpyxl.load_workbook(SPREADSHEET)
     failed = openpyxl.load_workbook(SPREADSHEET)
-    success = openpyxl.load_workbook(SPREADSHEET)
     for name in SHEET_NAMES:
         sheet = book[name]
         for row in range(2, sheet.max_row):
@@ -399,7 +397,6 @@ def main():
                     r.raw.decode_content = True
                     filename = f"{TEMP_DOWNLOAD_PATH}/{slugify(get_filename(r, url_path))}"
                     open(filename, 'wb').write(r.content)
-                    count = 0    
                     s3_key = f"{S3_BASE_KEY}{TEMP_DOWNLOAD_PATH}/DEV/{filename.split('/')[-1]}"
                     s3_uri = f"{S3_BASE_URL}/{s3_key}"
                     s3_client.upload_file(filename, BUCKET_NAME, s3_key)
@@ -415,13 +412,11 @@ def main():
                         
                     es.index(index=ES_INDEX, doc_type=DOC_TYPE, id=doc.pop('_id'), body=doc)
                     print(f"Finished processing row# {row} out of {sheet.max_row} in sheet {name}")
-                    failed[name].delete_row(row)
-                    failed.save(FAILURE_FILE)
+                    failed[name].delete_rows(row, 1)
             except Exception as e:
-                success[name].delete_rows(row)
-                success[name][f"E{row}"] = e
-                success.save(SUCCESS_FILE)
+                failed[name][f"E{row}"] = e
                 print(f"Failed processing row# {row} out of {sheet.max_row} in sheet {name} -- {e}")
+            failed.save(FAILURE_FILE)
     
     print('ERRORS --- ' + json.dumps(ERRORS))
             
