@@ -19,6 +19,9 @@ import pytesseract
 import sys 
 from pdf2image import convert_from_path
 from datetime import datetime
+import html2text
+from tika import parser	
+import PyPDF2
 
 import signal
 from io import StringIO
@@ -30,6 +33,7 @@ from pdfminer.layout import LAParams
 from pdfminer.pdfpage import PDFPage
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+warnings.filterwarnings("ignore", category=PyPDF2.utils.PdfReadWarning)
 
 TEMP_DOWNLOAD_PATH = '/tmp'
 ERRORS = []
@@ -90,7 +94,7 @@ def convertPdfDatetime(pd):
     clean = pd.decode("utf-8").replace("D:","").split('-')[0].split('+')[0]
     return datetime.strptime(clean,dtformat)
 
-def parse_pdfinfo(doc, fp):
+def pdfminer_parse_pdfinfo(doc, fp):
     """
     Takes in pdfinfo from PDFMiner and a document and enriches the document
     with metadata fields
@@ -112,6 +116,57 @@ def parse_pdfinfo(doc, fp):
     if last_modified:
         doc['modification_date'] = {'date': convertPdfDatetime(last_modified).strftime('%Y-%m-%dT%H:%M:%SZ')}
     return doc
+
+def parse_pdfinfo(t_m, doc, file_path):
+    """
+    Takes in pdfinfo from tika and a document and enriches the document
+    with metadata fields
+    """
+    title = t_m.get('title',None)
+    date = t_m.get('Creation-Date',t_m.get('created',None))
+    author = t_m.get('Author',None)	
+    last_modified = t_m.get('Last-Modified',None)
+
+    if title:
+        doc['title'] = title
+    if date:
+        doc['creation_date'] = {'date': date}
+    if author:
+        doc['source'] = {'author_name': author}
+    if last_modified:
+        doc['modification_date'] = {'date': last_modified}
+    return doc
+
+def extract_tika(file_path):	
+    """	
+    Take in a file path of a PDF and return its Tika extraction	
+    https://github.com/chrismattmann/tika-python	
+    	
+    Returns: a tuple of (extracted text, extracted metadata)	
+    """	
+    tika_data = parser.from_file(file_path)	
+    tika_extraction = tika_data.pop('content')	
+    tika_metadata = tika_data.pop('metadata')	
+    return (tika_extraction, tika_metadata)	
+
+def extract_pypdf2(file_path):	
+    """	
+    Take in a file path of a PDF and return its PyPDF2 extraction	
+    https://github.com/mstamy2/PyPDF2	
+    """	
+
+    pdfFileObj = open(file_path, 'rb')	
+    pdfReader = PyPDF2.PdfFileReader(pdfFileObj)	
+    page_count = pdfReader.numPages	
+    pypdf2_extraction = ''	
+    for page in range(page_count):	
+        pageObj = pdfReader.getPage(page)	
+        page_text = pageObj.extractText()	
+        pypdf2_extraction += page_text	
+    return pypdf2_extraction
+
+def extract_html2text(fp):
+    return html2text.html2text(fp.read())
 
 def extract_pytesseract(file_path):
     pages = convert_from_path(file_path, 500)
@@ -188,36 +243,68 @@ def parse_document(file_path, category, source_url):
         
         if 'pdf' in file_type or 'xml' in file_type:
             doc['file_type'] = 'pdf'
+            try:	
+                tika_extraction, tika_metadata = extract_tika(file_path)	
+                extracted_text['tika'] = tika_extraction
+            except:
+                try:
+                    copyfile(file_path, f'./tmp/{_id}.pdf')
+                    extract_tika(f'./tmp/{_id}.pdf')
+                except Exception as e:
+                    print(f"Tika extraction failed: {e}") 
+
+            try:
+                extracted_text['pypdf2'] = extract_pypdf2(file_path)
+            except Exception as e:
+                print(f"PyPDF2 extraction failed: {e}")
+
             try:
                 extracted_text['pdfminer'] = extract_pdfminer(fp)
             except Exception as e:
                 print(f"PDFMiner extraction failed: {e}")
+            
+            try:
                 extracted_text['pytesseract'] = extract_pytesseract(file_path)
+            except Exception as e:
+                print(f"PyTesseract extraction failed: {e}")
 
             if len(extracted_text.get('pdfminer', '')) == 0 and extracted_text.get('pytesseract') == None:
                 extracted_text['pytesseract'] = extract_pytesseract(file_path)
         elif 'html' in file_type or 'text' in file_type:
             doc['file_type'] = 'html'
-            extracted_text['bs4'] = extract_bs4(file_path)
+            try:
+                extracted_text['bs4'] = extract_bs4(file_path)
+            except Exception as e:
+                print(f"Failed extracting BS4: {e}")
+
+            try:
+                extracted_text['htm2text'] = extract_html2text(fp)
+            except Exception as e:
+                print(f"Failed extracting html2text: {e}")
         else:
-            if file_name != 'urlsatrctjqesrcssourcewebcd3ved0ahUKEwiL15Wux4XbAhWFhOAKHWIcAdEQFggxMAIurlhttp3A2F2Fwww.html':
-                raise ValueError("*** Could not find extractor for "+file_name+" with mime type - "+file_type)
+            raise ValueError("*** Could not find extractor for "+file_name+" with mime type - "+file_type)
         
         try:
-            doc = parse_pdfinfo(doc, fp)
+            doc = parse_pdfinfo(tika_metadata, doc, fp)
         except Exception as e:
             print(f"Error retrieving PDFINFO --- {e}")
         doc['extracted_text'] = extracted_text
+
+        # This add_periods method is used with both html2text and pdfminer text extraction used by UAZ
         doc = add_periods(doc)
-        bs4_len = len(extracted_text.get('bs4') or '')
-        pdfminer_len = len(extracted_text.get('pdfminer') or '')
-        pytesseract_len = len(extracted_text.get('pytesseract') or '')
-        if bs4_len < 500 and pdfminer_len < 500 and pytesseract_len < 500:
-            ERRORS.append("*** Error extracted_text for "+file_name+" with type "+file_type+" is less than 500 chars - "+json.dumps(extracted_text))
-            if file_name != 'urlsatrctjqesrcssourcewebcd3ved0ahUKEwiL15Wux4XbAhWFhOAKHWIcAdEQFggxMAIurlhttp3A2F2Fwww.html':
-                raise ValueError('ERRORS --- ' + json.dumps(ERRORS))
-        
+        validate_extracted_text(doc['extracted_text'], file_name, file_type)
         return doc
+
+def validate_extracted_text(extracted_text, file_name, file_type):
+    bs4_len = len(extracted_text.get('bs4') or '')
+    pdfminer_len = len(extracted_text.get('pdfminer') or '')
+    tika_len = len(extracted_text.get('tika') or '')
+    pypdf2_len = len(extracted_text.get('pypdf2') or '')
+    html2text_len = len(extracted_text.get('html2text') or '')
+    pytesseract_len = len(extracted_text.get('pytesseract') or '')
+    if bs4_len < 500 and pdfminer_len < 500 and pytesseract_len < 500 and html2text_len < 500 and tika_len < 500 and pypdf2_len < 500:
+        ERRORS.append("*** Error extracted_text for "+file_name+" with type "+file_type+" is less than 500 chars - "+json.dumps(extracted_text))
+        raise ValueError('ERRORS --- ' + json.dumps(ERRORS))
 
 def slugify(value):
     return ''.join([c for c in value if c.isalpha() or c.isdigit() or c ==' ' or c == '.']).rstrip()
@@ -234,11 +321,11 @@ def regex_periods(text):
 
 def add_periods(doc):
     pdfminer_text = doc['extracted_text'].get('pdfminer', None)
-    pytesseract_text = doc['extracted_text'].get('pytesseract', None)
+    html2text_text = doc['extracted_text'].get('html2text', None)
     if pdfminer_text:
         doc['extracted_text']['pdfminer'] = regex_periods(pdfminer_text)
-    if pytesseract_text:
-        doc['extracted_text']['pytesseract'] = regex_periods(pytesseract_text)
+    if html2text_text:
+        doc['extracted_text']['html2text'] = regex_periods(html2text_text)
     return doc
 
 
@@ -298,7 +385,7 @@ def main():
             }            
             
             es_count = es.count(index=ES_INDEX, body=query)['count']
-            if es_count < 1 and url_path != 'https://www.google.com/url?sa=t&rct=j&q=&esrc=s&source=web&cd=22&ved=2ahUKEwit4Iqhur7iAhWCslkKHagwBVw4FBAWMAF6BAgEEAI&url=https%3A%2F%2Fwww.ohchr.org%2FEN%2FHRBodies%2FHRC%2FRegularSessions%2FSession37%2FDocuments%2FA_HRC_37_71_EN.docx&usg=AOvVaw0iprhsfLaMxSxK0BXlaXSk' and url_path != 'https://reliefweb.int/sites/reliefweb.int/files/resources/20161110_cluster_snapshot_october_2016.pdf' and url_path != 'https://www.unicef.org/eapro/Brief_Nutrition_Overview.pdf' and url_path != 'http://documents.wfp.org/stellent/groups/public/documents/ena/wfp284277.pdf?_ga=2.110714181.1951289426.1518533341-841502227.1498664735' and url_path != 'http://www.ifpri.org/cdmref/p15738coll2/id/129073/filename/129284.pdf':
+            if es_count < 1:
                 print(f"Processing - {doc_name}")
                 print("Downloading - %s" % (url_path,))
                 r = requests.get(url_path, verify=False, stream=True, allow_redirects=True)
