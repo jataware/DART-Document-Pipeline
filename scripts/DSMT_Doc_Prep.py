@@ -6,8 +6,6 @@ from shutil import copyfile
 from hashlib import sha256
 from elasticsearch import Elasticsearch, RequestsHttpConnection
 from requests_aws4auth import AWS4Auth
-from tika import parser
-import PyPDF2
 from bs4 import BeautifulSoup
 from jsonschema import validate
 import warnings
@@ -19,9 +17,18 @@ import configparser
 from PIL import Image 
 import pytesseract 
 import sys 
-from pdf2image import convert_from_path 
+from pdf2image import convert_from_path
+from datetime import datetime
 
-warnings.filterwarnings("ignore", category=PyPDF2.utils.PdfReadWarning)
+import signal
+from io import StringIO
+from pdfminer.pdfparser import PDFParser
+from pdfminer.pdfdocument import PDFDocument
+from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
+from pdfminer.converter import TextConverter
+from pdfminer.layout import LAParams
+from pdfminer.pdfpage import PDFPage
+
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 TEMP_DOWNLOAD_PATH = '/tmp'
@@ -58,34 +65,6 @@ SHEET_NAMES = [
     'Luma-Provided Ethiopia Docs'
 ]
 
-def extract_tika(file_path):
-    """
-    Take in a file path of a PDF and return its Tika extraction
-    https://github.com/chrismattmann/tika-python
-    
-    Returns: a tuple of (extracted text, extracted metadata)
-    """
-    tika_data = parser.from_file(file_path)
-    tika_extraction = tika_data.pop('content')
-    tika_metadata = tika_data.pop('metadata')
-    return (tika_extraction, tika_metadata)
-
-def extract_pypdf2(file_path):
-    """
-    Take in a file path of a PDF and return its PyPDF2 extraction
-    https://github.com/mstamy2/PyPDF2
-    """
-    
-    pdfFileObj = open(file_path, 'rb')
-    pdfReader = PyPDF2.PdfFileReader(pdfFileObj)
-    page_count = pdfReader.numPages
-    pypdf2_extraction = ''
-    for page in range(page_count):
-        pageObj = pdfReader.getPage(page)
-        page_text = pageObj.extractText()
-        pypdf2_extraction += page_text
-    return pypdf2_extraction
-
 def extract_bs4(file_path):
     """
     Take in a file path of an HTML document and return its Beautiful Soup extraction
@@ -106,24 +85,32 @@ def extract_bs4(file_path):
     bs4_extraction = '\n'.join(chunk for chunk in chunks if chunk)
     return bs4_extraction
 
-def parse_pdfinfo(tika_metadata, doc, file_path):
+def convertPdfDatetime(pd):
+    dtformat = "%Y%m%d%H%M%S"
+    clean = pd.decode("utf-8").replace("D:","").split('-')[0].split('+')[0]
+    return datetime.strptime(clean,dtformat)
+
+def parse_pdfinfo(doc, fp):
     """
-    Takes in pdfinfo from Tika and a document and enriches the document
+    Takes in pdfinfo from PDFMiner and a document and enriches the document
     with metadata fields
     """
-    t_m = extract_tika(file_path)[1]
-    title = t_m.get('title',None)
-    date = t_m.get('Creation-Date',t_m.get('created',None))
-    author = t_m.get('Author',None)
-    last_modified = t_m.get('Last-Modified',None)
+    parser = PDFParser(fp)
+    pdfdoc = PDFDocument(parser)
+    info = pdfdoc.info[0]
+
+    title = info.get('Title',None)
+    date = info.get('CreationDate', info.get('created',None))
+    author = info.get('Author',None)
+    last_modified = info.get('ModDate',None)
     if title:
-        doc['title'] = title
+        doc['title'] = title.decode('utf-8')
     if date:
-        doc['creation_date'] = {'date': date}
+        doc['creation_date'] = {'date': convertPdfDatetime(date).strftime('%Y-%m-%dT%H:%M:%SZ')}
     if author:
-        doc['source'] = {'author_name': author}
+        doc['source'] = {'author_name': author.decode('utf-8')}
     if last_modified:
-        doc['modification_date'] = {'date': last_modified}
+        doc['modification_date'] = {'date': convertPdfDatetime(last_modified).strftime('%Y-%m-%dT%H:%M:%SZ')}
     return doc
 
 def extract_pytesseract(file_path):
@@ -146,6 +133,34 @@ def extract_pytesseract(file_path):
     return out_text
 
 
+def signal_handler(signum, frame):
+    raise Exception("Timed out.")
+
+def extract_pdfminer(fp, pages=None):
+    if not pages:
+        pagenums = set()
+    else:
+        pagenums = set(pages)
+
+    output = StringIO()
+    manager = PDFResourceManager()
+    converter = TextConverter(manager, output, laparams=LAParams())
+    interpreter = PDFPageInterpreter(manager, converter)
+
+    signal.signal(signal.SIGALRM, signal_handler)
+    signal.alarm(1800)
+
+    for page in PDFPage.get_pages(fp, pagenums):
+        interpreter.process_page(page)
+    converter.close()
+    text = output.getvalue()
+    output.close
+
+    signal.alarm(0)
+    
+    return text
+
+
 def parse_document(file_path, category, source_url):
     """
     Take in the full path to a file and perform appropriate text extrraction
@@ -153,70 +168,55 @@ def parse_document(file_path, category, source_url):
     """
     file_name = file_path.split('/')[-1]
     mime = magic.Magic(mime=True)
-    file_type = mime.from_file(file_path).split('/')[-1]
+    file_ext = source_url.split('.')[-1].split('?')[0].lower()
+    if 'pdf' in file_ext:
+        file_type = 'pdf'
+    else:
+        file_type = mime.from_file(file_path).split('/')[-1]
     
     # sha256 hash the raw contents of the file to generate a UUID
-    raw = open(file_path,'rb').read()
-    _id = sha256(raw).hexdigest()
-    
-    doc = {'_id': _id,
-           'file_name': file_name, 
-           'file_type': file_type,
-           'category': category,
-           'source_url': source_url}
-    
-    extracted_text = {}
-    
-    # set tika_metadata to None and overwrite it
-    # if we are able to extract pdfinfo with Tika
-    tika_metadata = None
-    
-    if 'pdf' in file_type or 'xml' in file_type:
-        doc['file_type'] = 'pdf'
-        try:
-            tika_extraction, tika_metadata = extract_tika(file_path)
-            extracted_text['tika'] = tika_extraction
-        except:
-            # need to strip random unicode from file_path so store a tmp file using the 
-            # documents _id. The path for this is currently hard coded
-            # TODO: remove hard coding of below error handling paths
+    with open(file_path, 'rb') as fp:
+        _id = sha256(fp.read()).hexdigest()
+        
+        doc = {'_id': _id,
+            'file_name': file_name, 
+            'file_type': file_type,
+            'category': category,
+            'source_url': source_url}
+        
+        extracted_text = {}
+        
+        if 'pdf' in file_type or 'xml' in file_type:
+            doc['file_type'] = 'pdf'
             try:
-                copyfile(file_path, f'./tmp/{_id}.pdf')
-                extract_tika(f'./tmp/{_id}.pdf')
+                extracted_text['pdfminer'] = extract_pdfminer(fp)
             except Exception as e:
-                print(f"Tika extraction failed: {e}") 
-        try:
-            extracted_text['pypdf2'] = extract_pypdf2(file_path)
-        except Exception as e:
-            print(f"PyPDF2 extraction failed: {e}")
-        try:
-            extracted_text['pytesseract'] = extract_pytesseract(file_path)
-        except Exception as e:
-            print(f"PyTesseract extraction failed: {e}")
-    elif 'html' in file_type or 'text' in file_type:
-        doc['file_type'] = 'html'
-        try:
+                print(f"PDFMiner extraction failed: {e}")
+                extracted_text['pytesseract'] = extract_pytesseract(file_path)
+
+            if len(extracted_text.get('pdfminer', '')) == 0 and extracted_text.get('pytesseract') == None:
+                extracted_text['pytesseract'] = extract_pytesseract(file_path)
+        elif 'html' in file_type or 'text' in file_type:
+            doc['file_type'] = 'html'
             extracted_text['bs4'] = extract_bs4(file_path)
+        else:
+            if file_name != 'urlsatrctjqesrcssourcewebcd3ved0ahUKEwiL15Wux4XbAhWFhOAKHWIcAdEQFggxMAIurlhttp3A2F2Fwww.html':
+                raise ValueError("*** Could not find extractor for "+file_name+" with mime type - "+file_type)
+        
+        try:
+            doc = parse_pdfinfo(doc, fp)
         except Exception as e:
-            print(f"BS4 extraction failed: {e}")
-    else:
-        if file_name != 'urlsatrctjqesrcssourcewebcd3ved0ahUKEwiL15Wux4XbAhWFhOAKHWIcAdEQFggxMAIurlhttp3A2F2Fwww.html':
-            raise ValueError("*** Could not find extractor for "+file_name+" with mime type - "+file_type)
-    
-    if tika_metadata:
-        doc = parse_pdfinfo(tika_metadata, doc, file_path)
-    
-    doc['extracted_text'] = extracted_text
-    bs4_len = len(extracted_text.get('bs4') or '')
-    tika_len = len(extracted_text.get('tika') or '')
-    pypdf2_len = len(extracted_text.get('pypdf2') or '')
-    pytesseract_len = len(extracted_text.get('pytesseract') or '')
-    if bs4_len < 500 and tika_len < 500 and pypdf2_len < 500 and pytesseract_len < 500:
-        ERRORS.append("*** Error extracted_text for "+file_name+" with type "+file_type+" is less than 500 chars - "+json.dumps(extracted_text))
-        if file_name != 'urlsatrctjqesrcssourcewebcd3ved0ahUKEwiL15Wux4XbAhWFhOAKHWIcAdEQFggxMAIurlhttp3A2F2Fwww.html':
-            raise ValueError('ERRORS --- ' + json.dumps(ERRORS))
-    
-    return doc
+            print(f"Error retrieving PDFINFO --- {e}")
+        doc['extracted_text'] = extracted_text
+        bs4_len = len(extracted_text.get('bs4') or '')
+        pdfminer_len = len(extracted_text.get('pdfminer') or '')
+        pytesseract_len = len(extracted_text.get('pytesseract') or '')
+        if bs4_len < 500 and pdfminer_len < 500 and pytesseract_len < 500:
+            ERRORS.append("*** Error extracted_text for "+file_name+" with type "+file_type+" is less than 500 chars - "+json.dumps(extracted_text))
+            if file_name != 'urlsatrctjqesrcssourcewebcd3ved0ahUKEwiL15Wux4XbAhWFhOAKHWIcAdEQFggxMAIurlhttp3A2F2Fwww.html':
+                raise ValueError('ERRORS --- ' + json.dumps(ERRORS))
+        
+        return doc
 
 def slugify(value):
     return ''.join([c for c in value if c.isalpha() or c.isdigit() or c ==' ' or c == '.']).rstrip()
@@ -284,16 +284,10 @@ def main():
             }            
             
             es_count = es.count(index=ES_INDEX, body=query)['count']
-            if es_count < 1 and url_path != 'https://www.unicef.org/eapro/Brief_Nutrition_Overview.pdf' and url_path != 'http://documents.wfp.org/stellent/groups/public/documents/ena/wfp284277.pdf?_ga=2.110714181.1951289426.1518533341-841502227.1498664735':
+            if es_count < 1 and url_path != 'https://reliefweb.int/sites/reliefweb.int/files/resources/20161110_cluster_snapshot_october_2016.pdf' and url_path != 'https://www.unicef.org/eapro/Brief_Nutrition_Overview.pdf' and url_path != 'http://documents.wfp.org/stellent/groups/public/documents/ena/wfp284277.pdf?_ga=2.110714181.1951289426.1518533341-841502227.1498664735' and url_path != 'http://www.ifpri.org/cdmref/p15738coll2/id/129073/filename/129284.pdf':
                 print(f"Processing - {doc_name}")
                 print("Downloading - %s" % (url_path,))
-                try:
-                    r = requests.get(url_path, verify=False, stream=True, allow_redirects=True, timeout=30)
-                except Exception as e:
-                    try:
-                        r = requests.get(url_path.replace('http://', 'https://'), verify=False, stream=True, allow_redirects=True, timeout=30)
-                    except Exception as e:
-                        r = requests.get(url_path.replace('www.', ''), verify=False, stream=True, allow_redirects=True, timeout=30)
+                r = requests.get(url_path, verify=False, stream=True, allow_redirects=True)
                 r.raw.decode_content = True
                 filename = f"{TEMP_DOWNLOAD_PATH}/{slugify(get_filename(r, url_path))}"
                 open(filename, 'wb').write(r.content)
@@ -312,9 +306,7 @@ def main():
                 validate(instance=doc, schema=schema)
                     
                 es.index(index=ES_INDEX, doc_type=DOC_TYPE, id=doc.pop('_id'), body=doc)
-                count += 1
-                if count % 25 == 0:
-                    print(count)    
+                print(f"Finished processing row# {row} out of {sheet.max_row} in sheet {name}")   
     print('ERRORS --- ' + json.dumps(ERRORS))
             
 
