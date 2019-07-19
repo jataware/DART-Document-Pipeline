@@ -208,6 +208,7 @@ def parse_document(file_path, category, source_url):
         except Exception as e:
             print(f"Error retrieving PDFINFO --- {e}")
         doc['extracted_text'] = extracted_text
+        doc = add_periods(doc)
         bs4_len = len(extracted_text.get('bs4') or '')
         pdfminer_len = len(extracted_text.get('pdfminer') or '')
         pytesseract_len = len(extracted_text.get('pytesseract') or '')
@@ -226,6 +227,19 @@ def get_filename(req, url):
     content_type = header.get('content-type')
     ext = content_type.split(';')[0].split('/')[-1]
     return f"{url.split('/')[-1][:225].split('.')[0]}.{ext}"
+
+def regex_periods(text):
+    res = re.sub(r'\s*\n\s*\n\s*', '.\n\n', text)
+    return re.sub(r'\.\.', '.', res)
+
+def add_periods(doc):
+    pdfminer_text = doc['extracted_text'].get('pdfminer', None)
+    pytesseract_text = doc['extracted_text'].get('pytesseract', None)
+    if pdfminer_text:
+        doc['extracted_text']['pdfminer'] = regex_periods(pdfminer_text)
+    if pytesseract_text:
+        doc['extracted_text']['pytesseract'] = regex_periods(pytesseract_text)
+    return doc
 
 
 def connect_to_es():
@@ -284,7 +298,7 @@ def main():
             }            
             
             es_count = es.count(index=ES_INDEX, body=query)['count']
-            if es_count < 1 and url_path != 'https://reliefweb.int/sites/reliefweb.int/files/resources/20161110_cluster_snapshot_october_2016.pdf' and url_path != 'https://www.unicef.org/eapro/Brief_Nutrition_Overview.pdf' and url_path != 'http://documents.wfp.org/stellent/groups/public/documents/ena/wfp284277.pdf?_ga=2.110714181.1951289426.1518533341-841502227.1498664735' and url_path != 'http://www.ifpri.org/cdmref/p15738coll2/id/129073/filename/129284.pdf':
+            if es_count < 1 and url_path != 'https://www.google.com/url?sa=t&rct=j&q=&esrc=s&source=web&cd=22&ved=2ahUKEwit4Iqhur7iAhWCslkKHagwBVw4FBAWMAF6BAgEEAI&url=https%3A%2F%2Fwww.ohchr.org%2FEN%2FHRBodies%2FHRC%2FRegularSessions%2FSession37%2FDocuments%2FA_HRC_37_71_EN.docx&usg=AOvVaw0iprhsfLaMxSxK0BXlaXSk' and url_path != 'https://reliefweb.int/sites/reliefweb.int/files/resources/20161110_cluster_snapshot_october_2016.pdf' and url_path != 'https://www.unicef.org/eapro/Brief_Nutrition_Overview.pdf' and url_path != 'http://documents.wfp.org/stellent/groups/public/documents/ena/wfp284277.pdf?_ga=2.110714181.1951289426.1518533341-841502227.1498664735' and url_path != 'http://www.ifpri.org/cdmref/p15738coll2/id/129073/filename/129284.pdf':
                 print(f"Processing - {doc_name}")
                 print("Downloading - %s" % (url_path,))
                 r = requests.get(url_path, verify=False, stream=True, allow_redirects=True)
