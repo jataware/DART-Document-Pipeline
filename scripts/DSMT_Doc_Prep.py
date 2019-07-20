@@ -22,9 +22,10 @@ from datetime import datetime
 import html2text
 from tika import parser	
 import PyPDF2
-
-import signal
+import threading
+import time
 from io import StringIO
+import traceback
 from pdfminer.pdfparser import PDFParser
 from pdfminer.pdfdocument import PDFDocument
 from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
@@ -36,7 +37,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 warnings.filterwarnings("ignore", category=PyPDF2.utils.PdfReadWarning)
 
 TEMP_DOWNLOAD_PATH = '/tmp'
-ERRORS = []
+OUTPUT_LOCK  = threading.Lock()
 
 # CONFIG
 
@@ -72,25 +73,29 @@ SHEET_NAMES = [
     'Luma-Provided Ethiopia Docs'
 ]
 
-def extract_bs4(file_path):
+def extract_bs4(file_path, extracted_text):
     """
     Take in a file path of an HTML document and return its Beautiful Soup extraction
     https://www.crummy.com/software/BeautifulSoup/bs4/doc/
-    """        
-    htmlFileObj = open(file_path, 'r')
-    soup = BeautifulSoup(htmlFileObj, "lxml")
-    # kill all script and style elements
-    for script in soup(["script", "style"]):
-        script.decompose()    # rip it out
-    # get text
-    text = soup.get_text()        
-    # break into lines and remove leading and trailing space on each
-    lines = (line.strip() for line in text.splitlines())
-    # break multi-headlines into a line each
-    chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
-    # drop blank lines
-    bs4_extraction = '\n'.join(chunk for chunk in chunks if chunk)
-    return bs4_extraction
+    """       
+    try: 
+        htmlFileObj = open(file_path, 'r')
+        soup = BeautifulSoup(htmlFileObj, "lxml")
+        # kill all script and style elements
+        for script in soup(["script", "style"]):
+            script.decompose()    # rip it out
+        # get text
+        text = soup.get_text()        
+        # break into lines and remove leading and trailing space on each
+        lines = (line.strip() for line in text.splitlines())
+        # break multi-headlines into a line each
+        chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+        # drop blank lines
+        bs4_extraction = '\n'.join(chunk for chunk in chunks if chunk)
+        extracted_text['bs4'] = bs4_extraction
+    except Exception:
+        with OUTPUT_LOCK:
+            print(f"Failed extracting BS4: {traceback.format_exc()}")
 
 def convertPdfDatetime(pd):
     dtformat = "%Y%m%d%H%M%S"
@@ -140,83 +145,93 @@ def parse_pdfinfo(t_m, doc, file_path):
         doc['modification_date'] = {'date': last_modified}
     return doc
 
-def extract_tika(file_path):	
+def extract_tika(file_path, extracted_text, tm):	
     """	
     Take in a file path of a PDF and return its Tika extraction	
     https://github.com/chrismattmann/tika-python	
     	
     Returns: a tuple of (extracted text, extracted metadata)	
     """	
-    tika_data = parser.from_file(file_path)	
-    tika_extraction = tika_data.pop('content')	
-    tika_metadata = tika_data.pop('metadata')	
-    return (tika_extraction, tika_metadata)	
+    try:
+        tika_data = parser.from_file(file_path)	
+        tika_extraction = tika_data.pop('content')	
+        tika_metadata = tika_data.pop('metadata')
+        extracted_text['tika'] = tika_extraction
+        tm = tika_metadata
+    except Exception:
+        with OUTPUT_LOCK:
+            print(f"Tika extraction failed: {traceback.format_exc()}") 
 
-def extract_pypdf2(file_path):	
+def extract_pypdf2(file_path, extracted_text):	
     """	
     Take in a file path of a PDF and return its PyPDF2 extraction	
     https://github.com/mstamy2/PyPDF2	
     """	
+    try:
+        pdfFileObj = open(file_path, 'rb')	
+        pdfReader = PyPDF2.PdfFileReader(pdfFileObj)	
+        page_count = pdfReader.numPages	
+        pypdf2_extraction = ''	
+        for page in range(page_count):	
+            pageObj = pdfReader.getPage(page)	
+            page_text = pageObj.extractText()	
+            pypdf2_extraction += page_text
+        extracted_text['pypdf2'] = pypdf2_extraction
+    except Exception:
+        with OUTPUT_LOCK:
+            print(f"PyPDF2 extraction failed: {traceback.format_exc()}")
 
-    pdfFileObj = open(file_path, 'rb')	
-    pdfReader = PyPDF2.PdfFileReader(pdfFileObj)	
-    page_count = pdfReader.numPages	
-    pypdf2_extraction = ''	
-    for page in range(page_count):	
-        pageObj = pdfReader.getPage(page)	
-        page_text = pageObj.extractText()	
-        pypdf2_extraction += page_text	
-    return pypdf2_extraction
+def extract_html2text(fp, extracted_text):
+    try:
+        extracted_text['htm2text'] = html2text.html2text(fp.read())
+    except Exception:
+        with OUTPUT_LOCK:
+            print(f"Failed extracting html2text: {traceback.format_exc()}")
 
-def extract_html2text(fp):
-    return html2text.html2text(fp.read())
+def extract_pytesseract(file_path, extracted_text):
+    try:
+        pages = convert_from_path(file_path, 500)
+        out_text = ""
+        image_counter = 1    
+        for page in pages: 
+            filename = f"{TEMP_DOWNLOAD_PATH}/page_{str(image_counter)}.jpg"
+            page.save(filename, 'JPEG')     
+            image_counter = image_counter + 1
+        
+        filelimit = image_counter-1
+        
+        for i in range(1, filelimit + 1): 
+            filename = f"{TEMP_DOWNLOAD_PATH}/page_{str(i)}.jpg"            
+            text = str(((pytesseract.image_to_string(Image.open(filename))))) 
+            text = text.replace('-\n', '')         
+            out_text += text
 
-def extract_pytesseract(file_path):
-    pages = convert_from_path(file_path, 500)
-    out_text = ""
-    image_counter = 1    
-    for page in pages: 
-        filename = f"{TEMP_DOWNLOAD_PATH}/page_{str(image_counter)}.jpg"
-        page.save(filename, 'JPEG')     
-        image_counter = image_counter + 1
-    
-    filelimit = image_counter-1
-    
-    for i in range(1, filelimit + 1): 
-        filename = f"{TEMP_DOWNLOAD_PATH}/page_{str(i)}.jpg"            
-        text = str(((pytesseract.image_to_string(Image.open(filename))))) 
-        text = text.replace('-\n', '')         
-        out_text += text
+        extracted_text['pytesseract'] = out_text
+    except Exception:
+        with OUTPUT_LOCK:
+            print(f"PyTesseract extraction failed: {traceback.format_exc()}")
 
-    return out_text
+def extract_pdfminer(fp, extracted_text, pages=None):
+    try:
+        if not pages:
+            pagenums = set()
+        else:
+            pagenums = set(pages)
 
+        output = StringIO()
+        manager = PDFResourceManager()
+        converter = TextConverter(manager, output, laparams=LAParams())
+        interpreter = PDFPageInterpreter(manager, converter)
 
-def signal_handler(signum, frame):
-    raise Exception("Timed out.")
-
-def extract_pdfminer(fp, pages=None):
-    if not pages:
-        pagenums = set()
-    else:
-        pagenums = set(pages)
-
-    output = StringIO()
-    manager = PDFResourceManager()
-    converter = TextConverter(manager, output, laparams=LAParams())
-    interpreter = PDFPageInterpreter(manager, converter)
-
-    signal.signal(signal.SIGALRM, signal_handler)
-    signal.alarm(1800)
-
-    for page in PDFPage.get_pages(fp, pagenums):
-        interpreter.process_page(page)
-    converter.close()
-    text = output.getvalue()
-    output.close
-
-    signal.alarm(0)
-    
-    return text
+        for page in PDFPage.get_pages(fp, pagenums):
+            interpreter.process_page(page)
+        converter.close()
+        text = output.getvalue()
+        output.close
+        extracted_text['pdfminer'] = text
+    except Exception as e:
+        with OUTPUT_LOCK:
+            print(f"PDFMiner extraction failed: {traceback.format_exc()}")
 
 
 def parse_document(file_path, category, source_url):
@@ -224,6 +239,7 @@ def parse_document(file_path, category, source_url):
     Take in the full path to a file and perform appropriate text extrraction
     as well as metadata enrichment (if a PDF, using pdfinfo fields)
     """
+    threads = []
     file_name = file_path.split('/')[-1]
     mime = magic.Magic(mime=True)
     file_ext = source_url.split('.')[-1].split('?')[0].lower()
@@ -246,51 +262,36 @@ def parse_document(file_path, category, source_url):
         
         if 'pdf' in file_type or 'xml' in file_type:
             doc['file_type'] = 'pdf'
-            try:	
-                tika_extraction, tika_metadata = extract_tika(file_path)	
-                extracted_text['tika'] = tika_extraction
-            except:
-                try:
-                    copyfile(file_path, f'./tmp/{_id}.pdf')
-                    extract_tika(f'./tmp/{_id}.pdf')
-                except Exception as e:
-                    print(f"Tika extraction failed: {e}") 
+            tika_metadata = None
+            extract_tika_thread = threading.Thread(target=extract_tika, args=(file_path, extracted_text, tika_metadata))
+            threads.append(extract_tika_thread)
 
-            try:
-                extracted_text['pypdf2'] = extract_pypdf2(file_path)
-            except Exception as e:
-                print(f"PyPDF2 extraction failed: {e}")
+            extract_pypdf2_thread = threading.Thread(target=extract_pypdf2, args=(file_path, extracted_text))
+            threads.append(extract_pypdf2_thread)
 
-            try:
-                extracted_text['pdfminer'] = extract_pdfminer(fp)
-            except Exception as e:
-                print(f"PDFMiner extraction failed: {e}")
+            extract_pdfminer_thread = threading.Thread(target=extract_pdfminer, args=(file_path, extracted_text))
+            threads.append(extract_pdfminer_thread)
             
-            try:
-                extracted_text['pytesseract'] = extract_pytesseract(file_path)
-            except Exception as e:
-                print(f"PyTesseract extraction failed: {e}")
-
-            if len(extracted_text.get('pdfminer', '')) == 0 and extracted_text.get('pytesseract') == None:
-                extracted_text['pytesseract'] = extract_pytesseract(file_path)
+            extract_pytesseract_thread = threading.Thread(target=extract_pytesseract, args=(file_path, extracted_text))
+            threads.append(extract_pytesseract_thread)
         elif 'html' in file_type or 'text' in file_type:
             doc['file_type'] = 'html'
-            try:
-                extracted_text['bs4'] = extract_bs4(file_path)
-            except Exception as e:
-                print(f"Failed extracting BS4: {e}")
-
-            try:
-                extracted_text['htm2text'] = extract_html2text(fp)
-            except Exception as e:
-                print(f"Failed extracting html2text: {e}")
+            extract_bs4_thread = threading.Thread(target=extract_bs4, args=(file_path, extracted_text))
+            threads.append(extract_bs4_thread)
+            extract_html2text_thread = threading.Thread(target=extract_html2text, args=(fp, extracted_text))
+            threads.append(extract_html2text_thread)
         else:
             raise ValueError("*** Could not find extractor for "+file_name+" with mime type - "+file_type)
         
+        for thread in threads:
+            thread.start()
+
+        for thread in threads:
+            thread.join()
         try:
             doc = parse_pdfinfo(tika_metadata, doc, fp)
-        except Exception as e:
-            print(f"Error retrieving PDFINFO --- {e}")
+        except Exception:
+            print(f"Error retrieving PDFINFO --- {traceback.format_exc()}")
         doc['extracted_text'] = extracted_text
 
         # This add_periods method is used with both html2text and pdfminer text extraction used by UAZ
@@ -373,9 +374,10 @@ def main():
     
     schema = json.loads(open("../document-schema.json").read())
     book = openpyxl.load_workbook(SPREADSHEET)
-    failed = openpyxl.load_workbook(SPREADSHEET)
+    failed = openpyxl.Workbook()
     for name in SHEET_NAMES:
         sheet = book[name]
+        failed.create_sheet(name)
         for row in range(2, sheet.max_row):
             try:
                 doc_name = sheet[f"A{row}"].value
@@ -413,13 +415,14 @@ def main():
                     es.index(index=ES_INDEX, doc_type=DOC_TYPE, id=doc.pop('_id'), body=doc)
                     print(f"Finished processing row# {row} out of {sheet.max_row} in sheet {name}")
                     failed[name].delete_rows(row, 1)
-            except Exception as e:
-                failed[name][f"E{row}"] = e
-                print(f"Failed processing row# {row} out of {sheet.max_row} in sheet {name} -- {e}")
-            failed.save(FAILURE_FILE)
-    
-    print('ERRORS --- ' + json.dumps(ERRORS))
-            
+            except Exception:
+                print(f"Failed processing row# {row} out of {sheet.max_row} in sheet {name} -- {traceback.format_exc()}")
+                failed[name][f"A{row}"] = sheet[f"A{row}"].value
+                failed[name][f"B{row}"] = sheet[f"B{row}"].value
+                failed[name][f"C{row}"] = sheet[f"C{row}"].value
+                failed[name][f"D{row}"] = sheet[f"D{row}"].value
+                failed[name][f"E{row}"] = traceback.format_exc().replace('"', '\\"')
+                failed.save(FAILURE_FILE)            
 
 if __name__ == '__main__':
     main()
