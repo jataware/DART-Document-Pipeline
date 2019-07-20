@@ -229,7 +229,7 @@ def extract_pdfminer(fp, extracted_text, pages=None):
         text = output.getvalue()
         output.close
         extracted_text['pdfminer'] = text
-    except Exception as e:
+    except Exception:
         with OUTPUT_LOCK:
             print(f"PDFMiner extraction failed: {traceback.format_exc()}")
 
@@ -269,7 +269,7 @@ def parse_document(file_path, category, source_url):
             extract_pypdf2_thread = threading.Thread(target=extract_pypdf2, args=(file_path, extracted_text))
             threads.append(extract_pypdf2_thread)
 
-            extract_pdfminer_thread = threading.Thread(target=extract_pdfminer, args=(file_path, extracted_text))
+            extract_pdfminer_thread = threading.Thread(target=extract_pdfminer, args=(fp, extracted_text))
             threads.append(extract_pdfminer_thread)
             
             extract_pytesseract_thread = threading.Thread(target=extract_pytesseract, args=(file_path, extracted_text))
@@ -292,6 +292,7 @@ def parse_document(file_path, category, source_url):
             doc = parse_pdfinfo(tika_metadata, doc, fp)
         except Exception:
             print(f"Error retrieving PDFINFO --- {traceback.format_exc()}")
+        
         doc['extracted_text'] = extracted_text
 
         # This add_periods method is used with both html2text and pdfminer text extraction used by UAZ
@@ -307,8 +308,7 @@ def validate_extracted_text(extracted_text, file_name, file_type):
     html2text_len = len(extracted_text.get('html2text') or '')
     pytesseract_len = len(extracted_text.get('pytesseract') or '')
     if bs4_len < 500 and pdfminer_len < 500 and pytesseract_len < 500 and html2text_len < 500 and tika_len < 500 and pypdf2_len < 500:
-        ERRORS.append("*** Error extracted_text for "+file_name+" with type "+file_type+" is less than 500 chars - "+json.dumps(extracted_text))
-        raise ValueError('ERRORS --- ' + json.dumps(ERRORS))
+        raise ValueError("*** Error extracted_text for "+file_name+" with type "+file_type+" is less than 500 chars - "+json.dumps(extracted_text))
 
 def slugify(value):
     return ''.join([c for c in value if c.isalpha() or c.isdigit() or c ==' ' or c == '.']).rstrip()
