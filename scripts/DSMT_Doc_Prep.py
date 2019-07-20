@@ -20,7 +20,7 @@ import sys
 from pdf2image import convert_from_path
 from datetime import datetime
 import html2text
-from tika import parser	
+from tika import parser 
 import PyPDF2
 import threading
 import time
@@ -132,7 +132,7 @@ def parse_pdfinfo(t_m, doc, file_path):
     """
     title = t_m.get('title',None)
     date = t_m.get('Creation-Date',t_m.get('created',None))
-    author = t_m.get('Author',None)	
+    author = t_m.get('Author',None) 
     last_modified = t_m.get('Last-Modified',None)
 
     if title:
@@ -145,16 +145,16 @@ def parse_pdfinfo(t_m, doc, file_path):
         doc['modification_date'] = {'date': last_modified}
     return doc
 
-def extract_tika(file_path, extracted_text, tm):	
-    """	
-    Take in a file path of a PDF and return its Tika extraction	
-    https://github.com/chrismattmann/tika-python	
-    	
-    Returns: a tuple of (extracted text, extracted metadata)	
-    """	
+def extract_tika(file_path, extracted_text, tm):    
+    """ 
+    Take in a file path of a PDF and return its Tika extraction 
+    https://github.com/chrismattmann/tika-python    
+        
+    Returns: a tuple of (extracted text, extracted metadata)    
+    """ 
     try:
-        tika_data = parser.from_file(file_path)	
-        tika_extraction = tika_data.pop('content')	
+        tika_data = parser.from_file(file_path) 
+        tika_extraction = tika_data.pop('content')  
         tika_metadata = tika_data.pop('metadata')
         extracted_text['tika'] = tika_extraction
         tm = tika_metadata
@@ -162,28 +162,30 @@ def extract_tika(file_path, extracted_text, tm):
         with OUTPUT_LOCK:
             print(f"Tika extraction failed: {traceback.format_exc()}") 
 
-def extract_pypdf2(file_path, extracted_text):	
-    """	
-    Take in a file path of a PDF and return its PyPDF2 extraction	
-    https://github.com/mstamy2/PyPDF2	
-    """	
+def extract_pypdf2(file_path, extracted_text):  
+    """ 
+    Take in a file path of a PDF and return its PyPDF2 extraction   
+    https://github.com/mstamy2/PyPDF2   
+    """ 
     try:
-        pdfFileObj = open(file_path, 'rb')	
-        pdfReader = PyPDF2.PdfFileReader(pdfFileObj)	
-        page_count = pdfReader.numPages	
-        pypdf2_extraction = ''	
-        for page in range(page_count):	
-            pageObj = pdfReader.getPage(page)	
-            page_text = pageObj.extractText()	
+        pdfFileObj = open(file_path, 'rb')  
+        pdfReader = PyPDF2.PdfFileReader(pdfFileObj)    
+        page_count = pdfReader.numPages 
+        pypdf2_extraction = ''  
+        for page in range(page_count):  
+            pageObj = pdfReader.getPage(page)   
+            page_text = pageObj.extractText()   
             pypdf2_extraction += page_text
         extracted_text['pypdf2'] = pypdf2_extraction
     except Exception:
         with OUTPUT_LOCK:
             print(f"PyPDF2 extraction failed: {traceback.format_exc()}")
 
-def extract_html2text(fp, extracted_text):
+def extract_html2text(file_path, extracted_text):
     try:
-        extracted_text['htm2text'] = html2text.html2text(fp.read())
+        with open(file_path, 'r') as fp:
+            text = fp.read()
+        extracted_text['html2text'] = html2text.html2text(text)
     except Exception:
         with OUTPUT_LOCK:
             print(f"Failed extracting html2text: {traceback.format_exc()}")
@@ -278,7 +280,7 @@ def parse_document(file_path, category, source_url):
             doc['file_type'] = 'html'
             extract_bs4_thread = threading.Thread(target=extract_bs4, args=(file_path, extracted_text))
             threads.append(extract_bs4_thread)
-            extract_html2text_thread = threading.Thread(target=extract_html2text, args=(fp, extracted_text))
+            extract_html2text_thread = threading.Thread(target=extract_html2text, args=(file_path, extracted_text))
             threads.append(extract_html2text_thread)
         else:
             raise ValueError("*** Could not find extractor for "+file_name+" with mime type - "+file_type)
@@ -426,3 +428,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+    
