@@ -14,13 +14,13 @@ import requests
 import urllib3
 import magic
 import configparser
-from PIL import Image 
-import pytesseract 
-import sys 
+from PIL import Image
+import pytesseract
+import sys
 from pdf2image import convert_from_path
 from datetime import datetime
 import html2text
-from tika import parser 
+from tika import parser
 import PyPDF2
 import threading
 import time
@@ -32,6 +32,7 @@ from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
 from pdfminer.converter import TextConverter
 from pdfminer.layout import LAParams
 from pdfminer.pdfpage import PDFPage
+import queue
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 warnings.filterwarnings("ignore", category=PyPDF2.utils.PdfReadWarning)
@@ -77,15 +78,15 @@ def extract_bs4(file_path, extracted_text):
     """
     Take in a file path of an HTML document and return its Beautiful Soup extraction
     https://www.crummy.com/software/BeautifulSoup/bs4/doc/
-    """       
-    try: 
+    """
+    try:
         htmlFileObj = open(file_path, 'r')
         soup = BeautifulSoup(htmlFileObj, "lxml")
         # kill all script and style elements
         for script in soup(["script", "style"]):
             script.decompose()    # rip it out
         # get text
-        text = soup.get_text()        
+        text = soup.get_text()
         # break into lines and remove leading and trailing space on each
         lines = (line.strip() for line in text.splitlines())
         # break multi-headlines into a line each
@@ -125,14 +126,14 @@ def pdfminer_parse_pdfinfo(doc, fp):
         doc['modification_date'] = {'date': convertPdfDatetime(last_modified).strftime('%Y-%m-%dT%H:%M:%SZ')}
     return doc
 
-def parse_pdfinfo(t_m, doc, file_path):
+def parse_pdfinfo(t_m, doc):
     """
     Takes in pdfinfo from tika and a document and enriches the document
     with metadata fields
     """
     title = t_m.get('title',None)
     date = t_m.get('Creation-Date',t_m.get('created',None))
-    author = t_m.get('Author',None) 
+    author = t_m.get('Author',None)
     last_modified = t_m.get('Last-Modified',None)
 
     if title:
@@ -145,36 +146,33 @@ def parse_pdfinfo(t_m, doc, file_path):
         doc['modification_date'] = {'date': last_modified}
     return doc
 
-def extract_tika(file_path, extracted_text, tm):    
-    """ 
-    Take in a file path of a PDF and return its Tika extraction 
-    https://github.com/chrismattmann/tika-python    
-        
-    Returns: a tuple of (extracted text, extracted metadata)    
-    """ 
+def extract_tika(file_path, extracted_text, out_queue):
+    """
+    Take in a file path of a PDF and return its Tika extraction
+    https://github.com/chrismattmann/tika-python
+
+    Returns: a tuple of (extracted text, extracted metadata)
+    """
     try:
-        tika_data = parser.from_file(file_path) 
-        tika_extraction = tika_data.pop('content')  
-        tika_metadata = tika_data.pop('metadata')
-        extracted_text['tika'] = tika_extraction
-        tm = tika_metadata
+        tika_data = parser.from_file(file_path)
+        out_queue.put(tika_data.pop('metadata'))
     except Exception:
         with OUTPUT_LOCK:
-            print(f"Tika extraction failed: {traceback.format_exc()}") 
+            print(f"Tika extraction failed: {traceback.format_exc()}")
 
-def extract_pypdf2(file_path, extracted_text):  
-    """ 
-    Take in a file path of a PDF and return its PyPDF2 extraction   
-    https://github.com/mstamy2/PyPDF2   
-    """ 
+def extract_pypdf2(file_path, extracted_text):
+    """
+    Take in a file path of a PDF and return its PyPDF2 extraction
+    https://github.com/mstamy2/PyPDF2
+    """
     try:
-        pdfFileObj = open(file_path, 'rb')  
-        pdfReader = PyPDF2.PdfFileReader(pdfFileObj)    
-        page_count = pdfReader.numPages 
-        pypdf2_extraction = ''  
-        for page in range(page_count):  
-            pageObj = pdfReader.getPage(page)   
-            page_text = pageObj.extractText()   
+        pdfFileObj = open(file_path, 'rb')
+        pdfReader = PyPDF2.PdfFileReader(pdfFileObj)
+        page_count = pdfReader.numPages
+        pypdf2_extraction = ''
+        for page in range(page_count):
+            pageObj = pdfReader.getPage(page)
+            page_text = pageObj.extractText()
             pypdf2_extraction += page_text
         extracted_text['pypdf2'] = pypdf2_extraction
     except Exception:
@@ -194,18 +192,18 @@ def extract_pytesseract(file_path, extracted_text):
     try:
         pages = convert_from_path(file_path, 500)
         out_text = ""
-        image_counter = 1    
-        for page in pages: 
+        image_counter = 1
+        for page in pages:
             filename = f"{TEMP_DOWNLOAD_PATH}/page_{str(image_counter)}.jpg"
-            page.save(filename, 'JPEG')     
+            page.save(filename, 'JPEG')
             image_counter = image_counter + 1
-        
+
         filelimit = image_counter-1
-        
-        for i in range(1, filelimit + 1): 
-            filename = f"{TEMP_DOWNLOAD_PATH}/page_{str(i)}.jpg"            
-            text = str(((pytesseract.image_to_string(Image.open(filename))))) 
-            text = text.replace('-\n', '')         
+
+        for i in range(1, filelimit + 1):
+            filename = f"{TEMP_DOWNLOAD_PATH}/page_{str(i)}.jpg"
+            text = str(((pytesseract.image_to_string(Image.open(filename)))))
+            text = text.replace('-\n', '')
             out_text += text
 
         extracted_text['pytesseract'] = out_text
@@ -249,23 +247,23 @@ def parse_document(file_path, category, source_url):
         file_type = 'pdf'
     else:
         file_type = mime.from_file(file_path).split('/')[-1]
-    
+
     # sha256 hash the raw contents of the file to generate a UUID
     with open(file_path, 'rb') as fp:
         _id = sha256(fp.read()).hexdigest()
-        
+
         doc = {'_id': _id,
-            'file_name': file_name, 
+            'file_name': file_name,
             'file_type': file_type,
             'category': category,
             'source_url': source_url}
-        
+
         extracted_text = {}
-        
+
         if 'pdf' in file_type or 'xml' in file_type:
             doc['file_type'] = 'pdf'
-            tika_metadata = None
-            extract_tika_thread = threading.Thread(target=extract_tika, args=(file_path, extracted_text, tika_metadata))
+            out_q = queue.Queue()
+            extract_tika_thread = threading.Thread(target=extract_tika, args=(file_path, extracted_text, out_q))
             threads.append(extract_tika_thread)
 
             extract_pypdf2_thread = threading.Thread(target=extract_pypdf2, args=(file_path, extracted_text))
@@ -273,7 +271,7 @@ def parse_document(file_path, category, source_url):
 
             extract_pdfminer_thread = threading.Thread(target=extract_pdfminer, args=(fp, extracted_text))
             threads.append(extract_pdfminer_thread)
-            
+
             extract_pytesseract_thread = threading.Thread(target=extract_pytesseract, args=(file_path, extracted_text))
             threads.append(extract_pytesseract_thread)
         elif 'html' in file_type or 'text' in file_type:
@@ -284,17 +282,18 @@ def parse_document(file_path, category, source_url):
             threads.append(extract_html2text_thread)
         else:
             raise ValueError("*** Could not find extractor for "+file_name+" with mime type - "+file_type)
-        
+
         for thread in threads:
             thread.start()
 
         for thread in threads:
             thread.join()
         try:
-            doc = parse_pdfinfo(tika_metadata, doc, fp)
+            tika_metadata = out_q.get()
+            doc = parse_pdfinfo(tika_metadata, doc)
         except Exception:
             print(f"Error retrieving PDFINFO --- {traceback.format_exc()}")
-        
+
         doc['extracted_text'] = extracted_text
 
         # This add_periods method is used with both html2text and pdfminer text extraction used by UAZ
@@ -350,7 +349,7 @@ def connect_to_es():
         SERVICE,
         session_token=token
     )
-    
+
     return Elasticsearch(
         hosts = [{'host': ES_HOST, 'port': 443}],
         http_auth=aws_auth,
@@ -370,10 +369,10 @@ def main():
     if not es.indices.exists(ES_INDEX):
         es.indices.create(ES_INDEX)
         print(f"Created ES index: {ES_INDEX}")
-    
+
     # Ensure we are connected
     print(json.dumps(es.info(), indent=2))
-    
+
     schema = json.loads(open("../document-schema.json").read())
     book = openpyxl.load_workbook(SPREADSHEET)
     failed = openpyxl.Workbook()
@@ -391,8 +390,8 @@ def main():
                             "source_url.keyword" : url_path
                         }
                     }
-                }            
-                
+                }
+
                 es_count = es.count(index=ES_INDEX, body=query)['count']
                 if es_count < 1:
                     print(f"Processing - {doc_name}")
@@ -404,16 +403,16 @@ def main():
                     s3_key = f"{S3_BASE_KEY}{TEMP_DOWNLOAD_PATH}/DEV/{filename.split('/')[-1]}"
                     s3_uri = f"{S3_BASE_URL}/{s3_key}"
                     s3_client.upload_file(filename, BUCKET_NAME, s3_key)
-                    
+
                     title = doc_name
                     category = name
                     source_url = url_path
                     creation_date = doc_date
                     doc = parse_document(filename, category, source_url)
                     doc['stored_url'] = s3_uri
-                    
+
                     validate(instance=doc, schema=schema)
-                        
+
                     es.index(index=ES_INDEX, doc_type=DOC_TYPE, id=doc.pop('_id'), body=doc)
                     print(f"Finished processing row# {row} out of {sheet.max_row} in sheet {name}")
                     failed[name].delete_rows(row, 1)
@@ -424,9 +423,8 @@ def main():
                 failed[name][f"C{row}"] = sheet[f"C{row}"].value
                 failed[name][f"D{row}"] = sheet[f"D{row}"].value
                 failed[name][f"E{row}"] = traceback.format_exc().replace('"', '\\"')
-                failed.save(FAILURE_FILE)            
+                failed.save(FAILURE_FILE)
 
 if __name__ == '__main__':
     main()
 
-    
