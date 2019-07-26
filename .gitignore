@@ -127,3 +127,4 @@ tmp/
 .DS_Store
 
 scripts/failures.xlsx
+node_modules/

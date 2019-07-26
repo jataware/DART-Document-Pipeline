@@ -59,14 +59,14 @@ def process_raw():
     es_index = request.form['index']
     filename = DOCS.save(request.files['user_file'])
     upload_doc(AWS_PROFILE, REGION, filename, request.form['username'], BUCKET_NAME, S3_KEY)
-    
+
     title = filename
     category = 'Migration'
     source_url = filename
     creation_date = ''
     doc = parse_document(filename, category, source_url)
     doc['stored_url'] = S3_URI
-    
+
     index_doc(es_index, DOC_TYPE, doc, AWS_PROFILE, ES_HOST, REGION, SERVICE)
     return jsonify(
         process_status='success',
@@ -78,22 +78,30 @@ def process_raw():
 def process_remote():
     es_index = request.form['index']
     url = request.form['url']
+    if(check_if_doc_exists(es_index, url, AWS_PROFILE, ES_HOST, REGION, SERVICE)):
+        return jsonify(
+            process_status='already_exists',
+            filename='',
+            url=url,
+            index=es_index
+        )
+
     r = requests.get(url, verify=False, stream=True, allow_redirects=True)
     r.raw.decode_content = True
     filename = f"{TEMP_DOWNLOAD_PATH}/{slugify(get_filename(r.headers.get('content-disposition'), url))}"
     open(filename, 'wb').write(r.content)
 
     upload_doc(AWS_PROFILE, REGION, filename, request.form['username'], BUCKET_NAME, S3_KEY)
-    
+
     title = url
     category = 'Migration'
     source_url = url
     creation_date = ''
     doc = parse_document(filename, category, source_url)
     doc['stored_url'] = S3_URI
-    
+
     index_doc(es_index, DOC_TYPE, doc, AWS_PROFILE, ES_HOST, REGION, SERVICE)
-    
+
     return jsonify(
         process_status='success',
         filename=filename,

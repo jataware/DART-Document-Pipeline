@@ -330,8 +330,8 @@ def add_periods(doc):
         doc['extracted_text']['html2text'] = regex_periods(html2text_text)
     return doc
 
-def connect_to_es():
-    session = boto3.Session(region_name=REGION, profile_name='wmuser')
+def connect_to_es(profile, host, region, service):
+    session = boto3.Session(region_name=region, profile_name=profile)
     credentials = session.get_credentials()
     credentials = credentials.get_frozen_credentials()
     access_key = credentials.access_key
@@ -340,28 +340,26 @@ def connect_to_es():
     aws_auth = AWS4Auth(
         access_key,
         secret_key,
-        REGION,
-        SERVICE,
+        region,
+        service,
         session_token=token
     )
 
     return Elasticsearch(
-        hosts = [{'host': ES_HOST, 'port': 443}],
+        hosts = [{'host': host, 'port': 443}],
         http_auth=aws_auth,
         use_ssl=True,
         verify_certs=True,
         connection_class=RequestsHttpConnection
     )
 
-def connect_to_s3():
-    session = boto3.Session(profile_name=AWS_PROFILE)
+def connect_to_s3(region, profile):
+    session = boto3.Session(region_name=region, profile_name=profile)
     s3 = session.resource("s3")
     return boto3.client("s3")
 
 def upload_doc(profile, region, filename, username, bucket, s3_key):
-    session = boto3.Session(region_name=region, profile_name=profile)
-    s3 = session.resource("s3")
-    s3_client = boto3.client("s3")
+    s3_client = connect_to_s3(region, profile)
     s3_client.upload_file(filename, bucket, f"{s3_key}/{username}/{filename.split('/')[-1]}")
 
 def index_doc(es_index, doc_type, doc, profile, host, region, service):
@@ -372,3 +370,15 @@ def index_doc(es_index, doc_type, doc, profile, host, region, service):
     if not es.indices.exists(es_index):
         es.indices.create(es_index)
     es.index(index=es_index, doc_type=doc_type, id=doc.pop('_id'), body=doc)
+
+def check_if_doc_exists(es_index, url, profile, host, region, service):
+    es = connect_to_es(profile, host, region, service)
+    query = {
+        "query": {
+            "match" : {
+                "source_url.keyword" : url
+            }
+        }
+    }
+    es_count = es.count(index=es_index, body=query)['count']
+    return es_count > 0
