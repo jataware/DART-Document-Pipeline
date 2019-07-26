@@ -367,12 +367,12 @@ def index_doc(es_index, doc_type, doc, profile, host, region, service):
     schema = json.loads(open("document-schema.json").read())
     # Validate document against schema
     validate(instance=doc, schema=schema)
-    if not es.indices.exists(es_index):
-        es.indices.create(es_index)
     es.index(index=es_index, doc_type=doc_type, id=doc.pop('_id'), body=doc)
 
 def check_if_doc_exists(es_index, url, profile, host, region, service):
     es = connect_to_es(profile, host, region, service)
+    if not es.indices.exists(es_index):
+        es.indices.create(es_index)
     query = {
         "query": {
             "match" : {
