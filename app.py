@@ -54,6 +54,16 @@ S3_KEY = f"{S3_BASE_KEY}{TEMP_DOWNLOAD_PATH}"
 S3_URI = f"{S3_BASE_URL}/{S3_KEY}"
 
 
+@app.route("/file_exists", methods=['POST'])
+def file_exists():
+    es_index = request.form['index']
+    url = request.form['url']
+    return jsonify(
+        url='',
+        exists=check_if_doc_exists(es_index, url, AWS_PROFILE, ES_HOST, REGION, SERVICE)
+    );
+
+
 @app.route("/process_raw", methods=['POST'])
 def process_raw():
     es_index = request.form['index']
@@ -88,7 +98,6 @@ def process_remote():
 
     r = requests.get(url, verify=False, stream=True, allow_redirects=True)
     r.raw.decode_content = True
-    print(json.dumps(dict(r.headers)))
     filename = f"{TEMP_DOWNLOAD_PATH}/{slugify(get_filename(r, url))}"
     open(filename, 'wb').write(r.content)
 
