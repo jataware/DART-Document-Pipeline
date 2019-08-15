@@ -59,7 +59,7 @@ def file_exists():
     es_index = request.form['index']
     url = request.form['url']
     return jsonify(
-        url='',
+        url=url,
         exists=check_if_doc_exists(es_index, url, AWS_PROFILE, ES_HOST, REGION, SERVICE)
     );
 
