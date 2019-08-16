@@ -1,57 +1,30 @@
 # DSMT-Doc-Preparation
 
-## What is this?
+## What it does
 
 This is a Flask Service and CLI that takes a url or raw document bytes and using the extractors below extracts the document raw text.
 After extraction the raw text and the metadata are stored in S3 and ElasticSearch based on the index and bucket parameters passed in.
 
-## Document Processing Libraries
 
-#### PDF Documents
-    * pdfminer.six
-    * pytesseract
-    * pdf2image
-    * pypdf2
-    * tika
-
-#### HTML/Text Documents
-    * BeautifulSoup4
-    * HTML2Text
-
-
-## CLI Build Requirements
+## Installing
 ```
-pip install requests-aws4auth==0.9
-pip install elasticsearch==7.0.2
-pip install boto3==1.9.172
-pip install beautifulsoup4==4.5.3
-pip install requests
-pip install openpyxl
-pip install configparser
-pip install lxml
-pip install libmagic
-pip install python-magic
-pip install python-magic-bin     # ubuntu: pip install python-magic-debian-bin
-pip install Pillow
-pip install pytesseract
-pip install pdf2image
-pip install pdfminer.six
-pip install tika==1.19
-pip install PyPDF2==1.26.0
-pip install jsonschema
-pip install html2text
-
-brew install tesseract # ubuntu: sudo apt-get install tesseract-ocr
-brew install poppler # ubuntu: sudo apt-get install poppler-utils
+pip install -r requirements.txt
 ```
 
-## Additional API Build Requirements
+### Additional OSX Installation Steps
 ```
-pip install Flask
-pip install Flask-Uploads
+brew install tesseract
+brew install poppler
 ```
 
-## CLI / Flask Configuration
+### Additional Ubuntu Installation Steps
+```
+sudo apt-get install tesseract-ocr
+sudo apt-get install poppler-utils
+```
+
+
+## Configuration
     We currently store configuration in `config` the schema is as follows:
 
     ```
@@ -79,6 +52,20 @@ pip install Flask-Uploads
 ```
 FLASK_APP=app.py python app.py
 ```
+
+
+## Document Processing Libraries
+
+#### PDF Documents
+    * pdfminer.six
+    * pytesseract
+    * pdf2image
+    * pypdf2
+    * tika
+
+#### HTML/Text Documents
+    * BeautifulSoup4
+    * HTML2Text
 
 
 ## Usage
