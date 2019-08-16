@@ -1,5 +1,24 @@
 # DSMT-Doc-Preparation
 
+## What is this?
+
+This is a Flask Service and CLI that takes a url or raw document bytes and using the extractors below extracts the document raw text.
+After extraction the raw text and the metadata are stored in S3 and ElasticSearch based on the index and bucket parameters passed in.
+
+## Document Processing Libraries
+
+#### PDF Documents
+    * pdfminer.six
+    * pytesseract
+    * pdf2image
+    * pypdf2
+    * tika
+
+#### HTML/Text Documents
+    * BeautifulSoup4
+    * HTML2Text
+
+
 ## CLI Build Requirements
 ```
 pip install requests-aws4auth==0.9
@@ -31,19 +50,6 @@ brew install poppler # ubuntu: sudo apt-get install poppler-utils
 pip install Flask
 pip install Flask-Uploads
 ```
-
-## Document Processing Libraries
-
-#### PDF Documents
-    * pdfminer.six
-    * pytesseract
-    * pdf2image
-    * pypdf2
-    * tika
-
-#### HTML/Text Documents
-    * BeautifulSoup4
-    * HTML2Text
 
 ## CLI / Flask Configuration
     We currently store configuration in `config` the schema is as follows:
@@ -158,3 +164,21 @@ SHEET_NAMES = [
 #### `notebooks/Document-Validity-Testing.ipynb`
 
 Validates documents in S3 and ElasticSearch...
+
+
+## Sample Code
+
+#### `pip install requests`
+
+```
+import requests
+
+payload = {
+    'index': 'test_index',
+    'url': 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf'
+    'username': 'clarence'
+}
+
+r = requests.post("http://localhost:5000/process_remote", data=payload)
+print r.content
+```
