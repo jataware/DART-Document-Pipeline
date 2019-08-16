@@ -1,4 +1,4 @@
-# DSMT-Doc-Preparation
+# DART Text Extraction Pipeline
 
 ## What it does
 
@@ -25,27 +25,29 @@ sudo apt-get install poppler-utils
 
 
 ## Configuration
-    We currently store configuration in `config` the schema is as follows:
 
-    ```
-        [ES]
-        doc_type = [Document schema to be used in ES]
-        region = [AWS Region]
-        service = [Service (ex: es)]
-        host = [Service host URL]
-        index = [ES index name]
+We currently store configuration in `config` the schema is as follows:
 
-        [S3]
-        base_url = [S3 host URL]
-        base_key = [S3 bucket path]
-        bucket_name = [S3 bucket name]
 
-        [AWS]
-        profile = [AWS profile name (pulled from `~/.aws/config`)]
+```
+[ES]
+doc_type = [Document schema to be used in ES]
+region = [AWS Region]
+service = [Service (ex: es)]
+host = [Service host URL]
+index = [ES index name]
 
-        [LOGGING]
-        fail_file=[Excel spreadsheet filename where failure debug info is stored]
-    ```
+[S3]
+base_url = [S3 host URL]
+base_key = [S3 bucket path]
+bucket_name = [S3 bucket name]
+
+[AWS]
+profile = [AWS profile name (pulled from `~/.aws/config`)]
+
+[LOGGING]
+fail_file=[Excel spreadsheet filename where failure debug info is stored]
+```
 
 
 ## Running
@@ -71,65 +73,83 @@ FLASK_APP=app.py python app.py
 ## Usage
 
 #### `/file_exists`
-##### Method: POST
+##### Method: `POST`
 
-    Description: Checks if the file passed in the URL exists in the ElasticSearch Index
-    Request Schema: ```
-        {
-            index: [string], // ES index name
-            url: [string] // File url to check
-        }
-    ```
-    Response Schema: ```
-        {
-            url: [string], // URL passed in as request param
-            exists: [boolean], // true or false based on if the file exists in ES
-        }
-    ```
+**Description**: Checks if the file passed in the URL exists in the ElasticSearch index.
+
+**Request Schema**: 
+
+```
+    {
+        index: [string], // ES index name
+        url: [string] // File url to check
+    }
+```
+
+**Response Schema**: 
+
+```
+    {
+        url: [string], // URL passed in as request param
+        exists: [boolean], // true or false based on if the file exists in ES
+    }
+```
 
 #### `/process_raw`
-##### Method: POST
+##### Method: `POST`
 
-    Description: Processes raw file (used when passing file bytes in as opposed to a remote file url) and saves the data/metadata to the requested ElasticSearch index and saves the file to the S3 bucket
-    Request Schema: ```
-        {
-            index: [string], // ES index name
-            user_file: [file], // Raw file passed in
-            username: [string], // Username to be used as part of file path in S3 (`s3_key/username/filename`)
-        }
-    ```
-    Response Schema: ```
-        {
-            process_status: [string], // success or failed
-            filename: [string], // Name of file uploaded
-            index: [string], // Name of ES index where doc exists
-        }
-    ```
+**Description**: Processes raw file (used when passing file bytes in as opposed to a remote file url) and saves the data/metadata to the requested ElasticSearch index and saves the file to the S3 bucket.
+
+**Request Schema**: 
+
+```
+{
+    index: [string], // ES index name
+    user_file: [file], // Raw file passed in
+    username: [string], // Username to be used as part of file path in S3 (`s3_key/username/filename`)
+}
+```
+
+**Response Schema**: 
+
+```
+    {
+        process_status: [string], // success or failed
+        filename: [string], // Name of file uploaded
+        index: [string], // Name of ES index where doc exists
+    }
+```
 
 #### `/process_remote`
-##### Method: POST
+##### Method: `POST`
 
-    Description: Processes remote file and saves the data/metadata to the requested ElasticSearch index and saves the file to the S3 bucket
-    Request Schema: ```
-        {
-            index: [string], // ES index name
-            url: [file], // URL of file uploaded
-            username: [string], // Username to be used as part of file path in S3 (`s3_key/username/filename`)
-        }
-    ```
-    Response Schema: ```
-        {
-            process_status: [string], // success or failed
-            url: [string], // URL of file uploaded
-            index: [string], // Name of ES index where doc exists
-        }
-    ```
+**Description**: Processes remote file and saves the data/metadata to the requested ElasticSearch index and saves the file to the S3 bucket.
+
+**Request Schema**: 
+
+```
+    {
+    index: [string], // ES index name
+    url: [file], // URL of file uploaded
+    username: [string], // Username to be used as part of file path in S3 (`s3_key/username/filename`)
+}
+```
+
+**Response Schema**: 
+
+```
+    {
+        process_status: [string], // success or failed
+        url: [string], // URL of file uploaded
+        index: [string], // Name of ES index where doc exists
+    }
+```
 
 ## Command-line Script(s)
 
-### `scripts/DSMT_Doc_Prep.py`
+You may also process documents using `scripts/DSMT_Doc_Prep.py`
 
-#### See above for PIP dependencies
+> See above for `pip` dependencies
 
 Processed documents in specific sheets within Excel spreadsheet (used individual thread for each extraction library). In order to run edit script:
 
